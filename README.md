@@ -1,6 +1,6 @@
-# README #
+DBCA utility functions mainly related to Django SSO authentication middleware.
 
-## SSO Login Middleware ##
+## SSO Login Middleware
 
 This will automatically login and create users using headers from an upstream proxy (REMOTE_USER and some others).
 The logout view will redirect to a separate logout page which clears the SSO session.
@@ -19,7 +19,7 @@ MIDDLEWARE = [
 ]
 ```
 
-## Audit model mixin and middleware ##
+## Audit model mixin and middleware
 
 ``AuditMixin`` is an extension of ``Django.db.model.Model`` that adds a
 number of additional fields:
