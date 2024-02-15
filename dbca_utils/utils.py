@@ -15,7 +15,7 @@ def env(key, default=None, required=False, value_type=None):
     except KeyError:
         if default is not None or not required:
             return default
-        raise Exception("Missing required environment variable '%s'" % key)
+        raise Exception(f"Missing required environment variable {key}")
 
     if value_type is None:
         if default is not None:
@@ -53,9 +53,7 @@ def env(key, default=None, required=False, value_type=None):
             return False
         else:
             raise Exception(
-                "'{}' is a boolean environment variable, only accept value 'true' ,'false' and '' with case insensitive, but the configured value is '{}'".format(
-                    key, value
-                )
+                f"{key} is a boolean environment variable and only accepts 'true' ,'false' and '' (case-insensitive), but the configured value is '{value}'"
             )
     elif issubclass(value_type, int):
         return int(value)
@@ -63,7 +61,5 @@ def env(key, default=None, required=False, value_type=None):
         return float(value)
     else:
         raise Exception(
-            "'{0}' is a {1} environment variable, but {1} is not supported now".format(
-                key, value_type
-            )
+            f"{key} is a {value_type} environment variable, but {value_type} is not supported now"
         )
