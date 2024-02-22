@@ -9,7 +9,7 @@ long_description = (this_directory / "README.md").read_text()
 
 setup(
     name='dbca-utils',
-    version='2.0.0',
+    version='2.0.1',
     packages=['dbca_utils'],
     description='Utilities for Django/Python apps',
     long_description=long_description,
