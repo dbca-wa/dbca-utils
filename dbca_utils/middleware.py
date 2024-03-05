@@ -3,6 +3,7 @@ from django.conf import settings
 from django.contrib.auth import login, logout, get_user_model
 from django.utils.deprecation import MiddlewareMixin
 from django.utils.functional import SimpleLazyObject
+from django.utils import timezone
 from django.contrib.auth.middleware import AuthenticationMiddleware, get_user
 
 from dbca_utils.utils import env
@@ -161,7 +162,7 @@ class SSOLoginMiddleware(MiddlewareMixin):
             ):
                 user = User.objects.filter(username__iexact=attributemap["username"])[0]
             else:
-                user = User()
+                user = User(last_login=timezone.localtime())
 
             # Set the user's details from the supplied information.
             user.__dict__.update(attributemap)
