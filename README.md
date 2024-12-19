@@ -25,6 +25,10 @@ Tagged releases are built and pushed to PyPI automatically using a GitHub
 workflow in the project. Update the project version in `pyproject.toml` and
 tag the required commit with the same value to trigger a release.
 
+Build the project locally using Poetry:
+
+    poetry build
+
 ## Installation
 
 1. Install via pip/Poetry/etc.: `pip install dbca-utils`
@@ -60,7 +64,7 @@ MIDDLEWARE = [
 
 `AuditMixin` is an extension of `Django.db.model.Model` that adds a number of additional fields:
 
-- creator - FK to `AUTH_USER_MODEL`, used to record the object creator
-- modifier - FK to `AUTH_USER_MODEL`, used to record who the object was last modified by
-- created - a timestamp that is set on initial object save
-- modified - an auto-updating timestamp (on each object save)
+- `creator` - FK to `AUTH_USER_MODEL`, used to record the object creator
+- `modifier` - FK to `AUTH_USER_MODEL`, used to record who the object was last modified by
+- `created` - a timestamp that is set on initial object save
+- `modified` - an auto-updating timestamp (on each object save)
