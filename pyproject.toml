@@ -1,0 +1,56 @@
+[tool.poetry]
+name = "dbca-utils"
+version = "2.0.3"
+description = "Utilities for DBCA Django apps"
+authors = [
+  "Rocky Chen <rocky.chen@dbca.wa.gov.au>",
+  "Ashley Felton <ashley.felton@dbca.wa.gov.au>",
+]
+license = "Apache-2.0"
+readme = "README.md"
+classifiers = [
+  "Framework :: Django",
+  "Framework :: Django :: 3.2",
+  "Framework :: Django :: 4.0",
+  "Framework :: Django :: 4.2",
+  "Framework :: Django :: 5.0",
+  "Environment :: Web Environment",
+  "Intended Audience :: Developers",
+  "Development Status :: 5 - Production/Stable",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+
+[tool.poetry.group.dev.dependencies]
+pytest-django = "^4.9.0"
+pytest-sugar = "^1.0.0"
+tox = "^4.23.2"
+
+[project.urls]
+homepage = "https://github.com/dbca-wa/dbca-utils"
+source = "https://github.com/dbca-wa/dbca-utils.git"
+changelog = "https://github.com/dbca-wa/dbca-utils/blob/master/CHANGELOG.md"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+django = ">=3.2,<5.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+# https://pytest-django.readthedocs.io/en/latest/configuring_django.html#pyproject-toml-settings
+DJANGO_SETTINGS_MODULE = "tests.settings"
+# https://pytest-django.readthedocs.io/en/latest/managing_python_path.html#using-pytest-s-pythonpath-option
+pythonpath = ". src"
+# https://pytest-django.readthedocs.io/en/latest/faq.html#my-tests-are-not-being-found-why
+python_files = "tests.py test_*.py"
