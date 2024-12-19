@@ -23,11 +23,13 @@ Run unit tests using `pytest` (or `tox`, to test against multiple Python version
 
 Tagged releases are built and pushed to PyPI automatically using a GitHub
 workflow in the project. Update the project version in `pyproject.toml` and
-tag the required commit with the same value to trigger a release.
+tag the required commit with the same value to trigger a release. Packages
+can also be built and uploaded manually, if desired.
 
-Build the project locally using Poetry:
+Build the project locally using Poetry, upload using `twine`:
 
     poetry build
+    twine upload dist/*
 
 ## Installation
 
