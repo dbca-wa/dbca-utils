@@ -16,7 +16,7 @@ Activate the virtualenv like so:
 
 Run unit tests using `pytest` (or `tox`, to test against multiple Python versions):
 
-    pytest -v
+    pytest -sv
     tox -v
 
 ## Releases

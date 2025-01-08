@@ -1,10 +1,10 @@
-from django import http, VERSION
+from django import http
 from django.conf import settings
-from django.contrib.auth import login, logout, get_user_model
+from django.contrib.auth import get_user_model, login, logout
+from django.contrib.auth.middleware import AuthenticationMiddleware, get_user
+from django.utils import timezone
 from django.utils.deprecation import MiddlewareMixin
 from django.utils.functional import SimpleLazyObject
-from django.utils import timezone
-from django.contrib.auth.middleware import AuthenticationMiddleware, get_user
 
 from dbca_utils.utils import env
 
@@ -17,10 +17,14 @@ def sync_usergroups(user, groups):
     from django.contrib.auth.models import Group
 
     usergroups = (
-        [Group.objects.get_or_create(name=name)[0] for name in groups.split(",")] if groups else []
+        [Group.objects.get_or_create(name=name)[0] for name in groups.split(",")]
+        if groups
+        else []
     )
     usergroups.sort(key=lambda o: o.id)
-    existing_usergroups = list(user.groups.exclude(name__in=LOCAL_USERGROUPS).order_by("id"))
+    existing_usergroups = list(
+        user.groups.exclude(name__in=LOCAL_USERGROUPS).order_by("id")
+    )
     index1 = 0
     index2 = 0
     len1 = len(usergroups)
@@ -96,7 +100,6 @@ class SSOLoginMiddleware(MiddlewareMixin):
     """
 
     def process_request(self, request):
-
         # Logout headers included with request.
         if (
             (
@@ -118,10 +121,7 @@ class SSOLoginMiddleware(MiddlewareMixin):
             # auth2 not enabled
             return
 
-        if VERSION < (2, 0):
-            user_authenticated = request.user.is_authenticated()
-        else:
-            user_authenticated = request.user.is_authenticated
+        user_authenticated = request.user.is_authenticated
 
         # Auth2 is enabled.
         # Request user is not authenticated.
@@ -158,7 +158,9 @@ class SSOLoginMiddleware(MiddlewareMixin):
                 user = User.objects.filter(email__iexact=attributemap["email"])[0]
             elif (
                 User.__name__ != "EmailUser"
-                and User.objects.filter(username__iexact=attributemap["username"]).exists()
+                and User.objects.filter(
+                    username__iexact=attributemap["username"]
+                ).exists()
             ):
                 user = User.objects.filter(username__iexact=attributemap["username"])[0]
             else:

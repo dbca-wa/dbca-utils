@@ -28,6 +28,9 @@ classifiers = [
   "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
+[tool.poetry.dependencies]
+python = ">=3.9,<4.0"
+django = ">=3.2,<5.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest-django = "^4.9.0"
@@ -40,10 +43,6 @@ homepage = "https://github.com/dbca-wa/dbca-utils"
 source = "https://github.com/dbca-wa/dbca-utils.git"
 changelog = "https://github.com/dbca-wa/dbca-utils/blob/master/CHANGELOG.md"
 GitHub = "https://github.com/dbca-wa/dbca-utils"
-
-[tool.poetry.dependencies]
-python = "^3.9"
-django = ">=3.2,<5.1"
 
 [build-system]
 requires = ["poetry-core"]

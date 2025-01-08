@@ -1,15 +1,23 @@
-import ast
 import os
+from ast import literal_eval
 
 
 def env(key, default=None, required=False, value_type=None):
     """
     Retrieves environment variables and returns Python natives. The (optional)
-    default will be returned if the environment variable does not exist.
+    `default` value will be returned if the environment variable does not exist.
+    Setting `required` will cause an Exception to be thrown if the variable does
+    not exist.
+    Setting `value_type` will try to ensure that the returned value is of the
+    nominated type (within reason).
+    Supported Python object types: str, list, tuple, bool, int, float.
     """
+    value = None
+
     try:
         value = os.environ[key]
-        value = ast.literal_eval(value)
+        # Evaluate the environment variable value as a Python object.
+        value = literal_eval(value)
     except (SyntaxError, ValueError):
         pass
     except KeyError:
@@ -17,14 +25,17 @@ def env(key, default=None, required=False, value_type=None):
             return default
         raise Exception(f"Missing required environment variable {key}")
 
-    if value_type is None:
-        if default is not None:
-            value_type = default.__class__
+    if value_type is None and default is not None:
+        # If we've passed a default return value but not set a value_type, use the
+        # default's type.
+        value_type = default.__class__
 
     if value_type is None:
         return value
     elif isinstance(value, value_type):
         return value
+    elif issubclass(value_type, str):
+        return str(value)
     elif issubclass(value_type, list):
         if isinstance(value, tuple):
             return list(value)
@@ -53,7 +64,7 @@ def env(key, default=None, required=False, value_type=None):
             return False
         else:
             raise Exception(
-                f"{key} is a boolean environment variable and only accepts 'true' ,'false' and '' (case-insensitive), but the configured value is '{value}'"
+                f"{key} is a boolean environment variable and only accepts 'true', 'false' or '' (case-insensitive), but the configured value is '{value}'"
             )
     elif issubclass(value_type, int):
         return int(value)
@@ -61,5 +72,5 @@ def env(key, default=None, required=False, value_type=None):
         return float(value)
     else:
         raise Exception(
-            f"{key} is a {value_type} environment variable, but {value_type} is not supported now"
+            f"{key} is a {value_type} environment variable, but {value_type} is not supported"
         )
