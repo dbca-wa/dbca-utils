@@ -28,16 +28,6 @@ classifiers = [
   "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
-[tool.poetry.dependencies]
-python = ">=3.9,<4.0"
-django = ">=3.2,<5.1"
-
-[tool.poetry.group.dev.dependencies]
-pytest-django = "^4.9.0"
-pytest-sugar = "^1.0.0"
-tox = "^4.23.2"
-twine = "^6.0.1"
-
 [project.urls]
 homepage = "https://github.com/dbca-wa/dbca-utils"
 source = "https://github.com/dbca-wa/dbca-utils.git"
@@ -47,6 +37,16 @@ GitHub = "https://github.com/dbca-wa/dbca-utils"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.dependencies]
+python = ">=3.9,<4.0"
+django = ">=3.2,<5.1"
+
+[tool.poetry.group.dev.dependencies]
+pytest-django = "^4.9.0"
+pytest-sugar = "^1.0.0"
+tox = "^4.23.2"
+twine = "^6.0.1"
 
 [tool.pytest.ini_options]
 # https://pytest-django.readthedocs.io/en/latest/configuring_django.html#pyproject-toml-settings
