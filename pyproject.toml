@@ -1,6 +1,6 @@
 [project]
 name = "dbca-utils"
-version = "2.0.3"
+version = "2.1.0"
 description = "Utilities for DBCA Django apps"
 authors = [
   { name = "Rocky Chen", email = "rocky.chen@dbca.wa.gov.au" },
@@ -9,25 +9,25 @@ authors = [
 readme = "README.md"
 classifiers = [
   "Framework :: Django",
-  "Framework :: Django :: 3.2",
   "Framework :: Django :: 4.0",
   "Framework :: Django :: 4.2",
   "Framework :: Django :: 5.0",
+  "Framework :: Django :: 5.2",
   "Environment :: Web Environment",
   "Intended Audience :: Developers",
   "Development Status :: 5 - Production/Stable",
   "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Software Development :: Libraries",
   "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-requires-python = ">=3.9,<4.0"
-dependencies = ["django>=3.2,<5.1"]
+requires-python = ">=3.10,<4.0"
+dependencies = ["django>=4,<6"]
 
 [project.urls]
 Homepage = "https://github.com/dbca-wa/dbca-utils"
@@ -36,7 +36,7 @@ Changelog = "https://github.com/dbca-wa/dbca-utils/blob/master/CHANGELOG.md"
 GitHub = "https://github.com/dbca-wa/dbca-utils"
 
 [dependency-groups]
-dev = ["pytest-django >= 4.9.0", "pytest-sugar >= 1.0.0", "tox >= 4.23.2"]
+dev = ["pytest-django >= 4.11.0", "pytest-sugar >= 1.0.0", "tox >= 4.25.0"]
 
 [tool.pytest.ini_options]
 # https://pytest-django.readthedocs.io/en/latest/configuring_django.html#pyproject-toml-settings
