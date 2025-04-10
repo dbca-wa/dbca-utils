@@ -1,12 +1,13 @@
 [project]
 name = "dbca-utils"
-version = "2.1.0"
+version = "2.1.1"
 description = "Utilities for DBCA Django apps"
 authors = [
   { name = "Rocky Chen", email = "rocky.chen@dbca.wa.gov.au" },
   { name = "Ashley Felton", email = "ashley.felton@dbca.wa.gov.au" },
 ]
 readme = "README.md"
+license = "Apache-2.0"
 classifiers = [
   "Framework :: Django",
   "Framework :: Django :: 4.0",
@@ -16,7 +17,6 @@ classifiers = [
   "Environment :: Web Environment",
   "Intended Audience :: Developers",
   "Development Status :: 5 - Production/Stable",
-  "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
@@ -42,6 +42,13 @@ dev = [
   "tox>=4.25.0",
   "tox-uv>=1.25.0",
 ]
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+[tool.uv]
+package = true
 
 [tool.pytest.ini_options]
 # https://pytest-django.readthedocs.io/en/latest/configuring_django.html#pyproject-toml-settings
