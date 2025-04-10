@@ -2,6 +2,8 @@
 
 ## Unpublished
 
+## 2.1.1 (2025-04-10)
+
 - Switch to using uv as the project build system.
 - Drop support for Python 3.9 and Django 3.2, add support for Python 3.13 and Django 5.2.
 - Added security policy.
