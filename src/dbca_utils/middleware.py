@@ -5,6 +5,7 @@ from django.contrib.auth.middleware import AuthenticationMiddleware, get_user
 from django.utils import timezone
 from django.utils.deprecation import MiddlewareMixin
 from django.utils.functional import SimpleLazyObject
+from markupsafe import escape
 
 from dbca_utils.utils import env
 
@@ -13,18 +14,16 @@ LOCAL_USERGROUPS = env("LOCAL_USERGROUPS", default=[])
 User = get_user_model()
 
 
-def sync_usergroups(user, groups):
+def sync_usergroups(user, groups=None):
     from django.contrib.auth.models import Group
 
-    usergroups = (
-        [Group.objects.get_or_create(name=name)[0] for name in groups.split(",")]
-        if groups
-        else []
-    )
+    if groups:
+        usergroups = [Group.objects.get_or_create(name=name)[0] for name in groups.split(",")]
+    else:
+        usergroups = []
+
     usergroups.sort(key=lambda o: o.id)
-    existing_usergroups = list(
-        user.groups.exclude(name__in=LOCAL_USERGROUPS).order_by("id")
-    )
+    existing_usergroups = list(user.groups.exclude(name__in=LOCAL_USERGROUPS).order_by("id"))
     index1 = 0
     index2 = 0
     len1 = len(usergroups)
@@ -76,9 +75,7 @@ if ENABLE_AUTH2_GROUPS:
             existing_groups = request.session.get("usergroups")
             if groups != existing_groups:
                 # User group is changed.
-                request.user = SimpleLazyUser(
-                    lambda: get_user(request), request, groups
-                )
+                request.user = SimpleLazyUser(lambda: get_user(request), request, groups)
                 return
         original_process_request(self, request)
 
@@ -102,11 +99,7 @@ class SSOLoginMiddleware(MiddlewareMixin):
     def process_request(self, request):
         # Logout headers included with request.
         if (
-            (
-                request.path.startswith("/logout")
-                or request.path.startswith("/admin/logout")
-                or request.path.startswith("/ledger/logout")
-            )
+            (request.path.startswith("/logout") or request.path.startswith("/admin/logout") or request.path.startswith("/ledger/logout"))
             and "HTTP_X_LOGOUT_URL" in request.META
             and request.META["HTTP_X_LOGOUT_URL"]
         ):
@@ -114,18 +107,20 @@ class SSOLoginMiddleware(MiddlewareMixin):
             return http.HttpResponseRedirect(request.META["HTTP_X_LOGOUT_URL"])
 
         # Auth2 is not enabled, skip further processing.
-        if (
-            "HTTP_REMOTE_USER" not in request.META
-            or not request.META["HTTP_REMOTE_USER"]
-        ):
+        if "HTTP_REMOTE_USER" not in request.META or not request.META["HTTP_REMOTE_USER"]:
             # auth2 not enabled
             return
 
-        user_authenticated = request.user.is_authenticated
-
         # Auth2 is enabled.
-        # Request user is not authenticated.
-        if not user_authenticated:
+        # Security check: if the logged-in request user's email does not match the email
+        # returned from Auth2, invalidate the current request session and force a new session
+        # using the returned SSO values.
+        if request.user.is_authenticated and request.user.email != request.META["HTTP_X_EMAIL"]:
+            logout(request)
+
+        # Request user is not authenticated locally: obtain user attributes from the request.META dict
+        # returned by SSO.
+        if not request.user.is_authenticated:
             attributemap = {
                 "username": "HTTP_REMOTE_USER",
                 "last_name": "HTTP_X_LAST_NAME",
@@ -137,31 +132,28 @@ class SSOLoginMiddleware(MiddlewareMixin):
                 if value in request.META:
                     attributemap[key] = request.META[value]
 
+            # Sanitise first_name and last_name values, because end-users have control over these
+            # values and could conceivably inject malicious values into them (e.g. a XSS attack).
+            if "first_name" in attributemap:
+                attributemap["first_name"] = str(escape(attributemap["first_name"]))
+            if "last_name" in attributemap:
+                attributemap["last_name"] = str(escape(attributemap["last_name"]))
+
             # Optional setting: projects may define accepted user email domains either as
             # a list of strings, or a single string.
-            if (
-                hasattr(settings, "ALLOWED_EMAIL_SUFFIXES")
-                and settings.ALLOWED_EMAIL_SUFFIXES
-            ):
-                allowed = settings.ALLOWED_EMAIL_SUFFIXES
+            if hasattr(settings, "ALLOWED_EMAIL_SUFFIXES") and settings.ALLOWED_EMAIL_SUFFIXES:
                 if isinstance(settings.ALLOWED_EMAIL_SUFFIXES, str):
-                    allowed = [settings.ALLOWED_EMAIL_SUFFIXES]
-                if not any(
-                    [attributemap["email"].lower().endswith(x) for x in allowed]
-                ):
+                    allowed_email_suffixes = list(settings.ALLOWED_EMAIL_SUFFIXES)
+                else:
+                    allowed_email_suffixes = settings.ALLOWED_EMAIL_SUFFIXES
+                # If the user email suffix is not in the allowed list, return a 404 response.
+                if not any([attributemap["email"].lower().endswith(suffix) for suffix in allowed_email_suffixes]):
                     return http.HttpResponseForbidden()
 
-            if (
-                attributemap["email"]
-                and User.objects.filter(email__iexact=attributemap["email"]).exists()
-            ):
+            # Check for an existing User instance.
+            if attributemap["email"] and User.objects.filter(email__iexact=attributemap["email"]).exists():
                 user = User.objects.filter(email__iexact=attributemap["email"])[0]
-            elif (
-                User.__name__ != "EmailUser"
-                and User.objects.filter(
-                    username__iexact=attributemap["username"]
-                ).exists()
-            ):
+            elif User.__name__ != "EmailUser" and User.objects.filter(username__iexact=attributemap["username"]).exists():
                 user = User.objects.filter(username__iexact=attributemap["username"])[0]
             else:
                 user = User(last_login=timezone.localtime())
@@ -174,7 +166,7 @@ class SSOLoginMiddleware(MiddlewareMixin):
             # Log the user in.
             login(request, user)
 
-            # Synchronize the user groups
+            # Synchronize the user groups.
             if ENABLE_AUTH2_GROUPS and "HTTP_X_GROUPS" in request.META:
                 groups = request.META["HTTP_X_GROUPS"] or None
                 sync_usergroups(user, groups)

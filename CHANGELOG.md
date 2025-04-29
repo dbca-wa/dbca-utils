@@ -2,6 +2,10 @@
 
 ## Unpublished
 
+## 2.1.2 (2025-04-29)
+
+- Update `SSOLoginMiddleware` to sanitise user-supplied name input values.
+
 ## 2.1.1 (2025-04-10)
 
 - Switch to using uv as the project build system.

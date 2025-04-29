@@ -1,6 +1,6 @@
 [project]
 name = "dbca-utils"
-version = "2.1.1"
+version = "2.1.2"
 description = "Utilities for DBCA Django apps"
 authors = [
   { name = "Rocky Chen", email = "rocky.chen@dbca.wa.gov.au" },
@@ -27,7 +27,7 @@ classifiers = [
   "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 requires-python = ">=3.10,<4.0"
-dependencies = ["django>=4,<6"]
+dependencies = ["django>=4,<6", "markupsafe==3.0.2"]
 
 [project.urls]
 Homepage = "https://github.com/dbca-wa/dbca-utils"
@@ -57,3 +57,10 @@ DJANGO_SETTINGS_MODULE = "tests.settings"
 pythonpath = ". src"
 # https://pytest-django.readthedocs.io/en/latest/faq.html#my-tests-are-not-being-found-why
 python_files = "tests.py test_*.py"
+
+[tool.ruff]
+line-length = 140
+indent-width = 4
+
+[tool.ruff.lint]
+ignore = ["E265", "E501", "E722"]
