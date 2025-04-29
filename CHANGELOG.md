@@ -2,9 +2,11 @@
 
 ## Unpublished
 
-## 2.1.2 (2025-04-29)
+## 2.1.3 (2025-04-29)
 
 - Update `SSOLoginMiddleware` to sanitise user-supplied name input values.
+
+## 2.1.2 (yanked)
 
 ## 2.1.1 (2025-04-10)
 
