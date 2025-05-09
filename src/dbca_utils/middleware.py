@@ -5,6 +5,7 @@ from django.contrib.auth.middleware import AuthenticationMiddleware, get_user
 from django.utils import timezone
 from django.utils.deprecation import MiddlewareMixin
 from django.utils.functional import SimpleLazyObject
+from django.utils.html import strip_tags
 from markupsafe import escape
 
 from dbca_utils.utils import env
@@ -135,8 +136,10 @@ class SSOLoginMiddleware(MiddlewareMixin):
             # Sanitise first_name and last_name values, because end-users have control over these
             # values and could conceivably inject malicious values into them (e.g. a XSS attack).
             if "first_name" in attributemap:
+                attributemap["first_name"] = strip_tags(attributemap["first_name"])
                 attributemap["first_name"] = str(escape(attributemap["first_name"]))
             if "last_name" in attributemap:
+                attributemap["last_name"] = strip_tags(attributemap["first_name"])
                 attributemap["last_name"] = str(escape(attributemap["last_name"]))
 
             # Optional setting: projects may define accepted user email domains either as
