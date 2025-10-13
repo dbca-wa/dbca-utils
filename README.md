@@ -28,10 +28,8 @@ Run unit tests using `pytest` (or `tox`, to test against multiple Python version
 Tagged releases are built and pushed to PyPI automatically using a GitHub
 workflow in the project. Update the project version in `pyproject.toml` and
 tag the required commit with the same value to trigger a release. Packages
-can also be built and uploaded manually, if desired.
-
-Build the project locally using uv, [publish to the PyPI registry](https://docs.astral.sh/uv/guides/publish/#publishing-your-package)
-using the same tool if you require:
+can also be built and uploaded manually to PyPI using [uv](https://docs.astral.sh/uv/guides/publish/#publishing-your-package),
+if required:
 
     uv build
     uv publish
