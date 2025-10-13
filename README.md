@@ -2,18 +2,16 @@
 
 DBCA Django utility classes and functions.
 
+## Requirements
+
+- Python 3.10 or later
+- Django 4.2 or later
+
 ## Development
 
-The recommended way to set up this project for development is using
-[uv](https://docs.astral.sh/uv/)
-to install and manage a Python virtual environment.
-With uv installed, install the required Python version (see `pyproject.toml`). Example:
+Dependencies for this project are managed using [uv](https://docs.astral.sh/uv/).
+With uv installed, change into the project directory and run:
 
-    uv python install 3.12
-
-Change into the project directory and run:
-
-    uv python pin 3.12
     uv sync
 
 Activate the virtualenv like so:
@@ -40,7 +38,7 @@ using the same tool if you require:
 
 ## Installation
 
-1. Install via pip/etc.: `pip install dbca-utils`
+1. Install via uv/pip/etc.: `pip install dbca-utils`
 
 ## SSO Login Middleware
 

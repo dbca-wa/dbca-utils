@@ -2,6 +2,11 @@
 
 ## Unpublished
 
+## 2.1.4 (2025-10-14)
+
+- Drop Django 4.0 support.
+- Bump project dependencies.
+
 ## 2.1.3 (2025-04-29)
 
 - Update `SSOLoginMiddleware` to sanitise user-supplied name input values.
