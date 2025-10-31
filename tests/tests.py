@@ -26,7 +26,7 @@ os.environ["TEST_TUPLE"] = "('a', 'b', 'c')"
 os.environ["TEST_BOOL"] = "False"
 
 
-class TestUtils(TestCase):
+class UtilsTest(TestCase):
     def test_env_returns_str(self):
         test_str = env("TEST_STR")
         self.assertTrue(isinstance(test_str, str))
@@ -68,14 +68,12 @@ class TestUtils(TestCase):
         self.assertTrue(isinstance(test_str, str))
 
 
-class TestModelTests(TestCase):
+class ModelTest(TestCase):
     client = Client()
     model = TestModel
 
     def setUp(self):
-        self.user = User.objects.create_user(
-            username="test", email="test@email.com", password="secret"
-        )
+        self.user = User.objects.create_user(username="test", email="test@email.com", password="secret")
         self.test_model = TestModel.objects.create(name=TEST_NAME)
         self.client.login(username="test", password="secret")
 
@@ -109,3 +107,53 @@ class TestModelTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, TEST_VAR)
         self.assertContains(response, TEST_NAME)
+
+
+class SSOLoginMiddlewareTest(TestCase):
+    client = Client()
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="testuser", email="testuser@email.com")
+        # Ensure that the client starts logged out.
+        self.client.logout()
+
+    def test_sso_login(self):
+        """Test that requests having the required META headers will automatically sign in users."""
+        url = reverse("test_model_list")
+        response = self.client.get(
+            url,
+            HTTP_REMOTE_USER="testuser",
+            HTTP_X_EMAIL="testuser@email.com",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Authenticated: True")
+
+    def test_user_properties_update(self):
+        """Test that requests with relevant META headers will update user properties."""
+        url = reverse("test_model_list")
+
+        response = self.client.get(
+            url,
+            HTTP_REMOTE_USER="testuser",
+            HTTP_X_EMAIL="testuser@email.com",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Authenticated: True")
+        user = User.objects.get(email="testuser@email.com")
+        self.assertEqual(user.first_name, "")
+        self.assertEqual(user.last_name, "")
+
+        # Simulate a name change via SSO.
+        self.client.logout()
+        response = self.client.get(
+            url,
+            HTTP_REMOTE_USER="testuser",
+            HTTP_X_EMAIL="testuser@email.com",
+            HTTP_X_FIRST_NAME="Test",
+            HTTP_X_LAST_NAME="User",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Name: Test User")
+        user = User.objects.get(email="testuser@email.com")
+        self.assertEqual(user.first_name, "Test")
+        self.assertEqual(user.last_name, "User")

@@ -1,12 +1,17 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <title>{{ TITLE }}</title>
-    </head>
-    <body>
-        <ul>
-            {% for object in object_list %}<li>{{ object.name }}, {{ object.created|date:"r" }}</li>{% endfor %}
-        </ul>
-    </body>
+  <head>
+    <meta charset="UTF-8" />
+    <title>{{ TITLE }}</title>
+  </head>
+  <body>
+    <div>Authenticated: {{ user.is_authenticated }}</div>
+    <div>Email: {{ user.email }}</div>
+    <div>Name: {{ user.get_full_name }}</div>
+    <ul>
+      {% for object in object_list %}
+      <li>{{ object.name }}, {{ object.created|date:"r" }}</li>
+      {% endfor %}
+    </ul>
+  </body>
 </html>
