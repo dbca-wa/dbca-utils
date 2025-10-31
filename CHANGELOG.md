@@ -1,6 +1,8 @@
 # Changelog
 
-## Unpublished
+## 2.1.5 (2025-10-31)
+
+- Bugfix: `last_name` was incorrectly replaced by `first_name` in SSOLoginMiddleware.
 
 ## 2.1.4 (2025-10-14)
 
