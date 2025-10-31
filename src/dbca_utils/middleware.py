@@ -139,7 +139,7 @@ class SSOLoginMiddleware(MiddlewareMixin):
                 attributemap["first_name"] = strip_tags(attributemap["first_name"])
                 attributemap["first_name"] = str(escape(attributemap["first_name"]))
             if "last_name" in attributemap:
-                attributemap["last_name"] = strip_tags(attributemap["first_name"])
+                attributemap["last_name"] = strip_tags(attributemap["last_name"])
                 attributemap["last_name"] = str(escape(attributemap["last_name"]))
 
             # Optional setting: projects may define accepted user email domains either as
