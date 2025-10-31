@@ -87,9 +87,9 @@ class SSOLoginMiddleware(MiddlewareMixin):
     """Django middleware to process HTTP requests containing headers set by the Auth2
     SSO service, specificially:
     - `HTTP_REMOTE_USER`
+    - `HTTP_X_EMAIL`
     - `HTTP_X_LAST_NAME`
     - `HTTP_X_FIRST_NAME`
-    - `HTTP_X_EMAIL`
     The middleware assesses requests containing these headers, and (having deferred user
     authentication to the upstream service), retrieves the local Django User and logs
     the user in automatically.
@@ -124,23 +124,24 @@ class SSOLoginMiddleware(MiddlewareMixin):
         if not request.user.is_authenticated:
             attributemap = {
                 "username": "HTTP_REMOTE_USER",
+                "email": "HTTP_X_EMAIL",
                 "last_name": "HTTP_X_LAST_NAME",
                 "first_name": "HTTP_X_FIRST_NAME",
-                "email": "HTTP_X_EMAIL",
             }
+            attributes = {"email": "", "username": ""}
 
-            for key, value in attributemap.items():
-                if value in request.META:
-                    attributemap[key] = request.META[value]
+            for key, meta_value in attributemap.items():
+                if meta_value in request.META:
+                    attributes[key] = request.META[meta_value]
 
             # Sanitise first_name and last_name values, because end-users have control over these
             # values and could conceivably inject malicious values into them (e.g. a XSS attack).
-            if "first_name" in attributemap:
-                attributemap["first_name"] = strip_tags(attributemap["first_name"])
-                attributemap["first_name"] = str(escape(attributemap["first_name"]))
-            if "last_name" in attributemap:
-                attributemap["last_name"] = strip_tags(attributemap["last_name"])
-                attributemap["last_name"] = str(escape(attributemap["last_name"]))
+            if "first_name" in attributes:
+                attributes["first_name"] = strip_tags(attributes["first_name"])
+                attributes["first_name"] = str(escape(attributes["first_name"]))
+            if "last_name" in attributes:
+                attributes["last_name"] = strip_tags(attributes["last_name"])
+                attributes["last_name"] = str(escape(attributes["last_name"]))
 
             # Optional setting: projects may define accepted user email domains either as
             # a list of strings, or a single string.
@@ -150,20 +151,26 @@ class SSOLoginMiddleware(MiddlewareMixin):
                 else:
                     allowed_email_suffixes = settings.ALLOWED_EMAIL_SUFFIXES
                 # If the user email suffix is not in the allowed list, return a 404 response.
-                if not any([attributemap["email"].lower().endswith(suffix) for suffix in allowed_email_suffixes]):
+                if not any([attributes["email"].lower().endswith(suffix) for suffix in allowed_email_suffixes]):
                     return http.HttpResponseForbidden()
 
             # Check for an existing User instance.
-            if attributemap["email"] and User.objects.filter(email__iexact=attributemap["email"]).exists():
-                user = User.objects.filter(email__iexact=attributemap["email"])[0]
-            elif User.__name__ != "EmailUser" and User.objects.filter(username__iexact=attributemap["username"]).exists():
-                user = User.objects.filter(username__iexact=attributemap["username"])[0]
+            if attributes["email"] and User.objects.filter(email__iexact=attributes["email"]).exists():
+                user = User.objects.filter(email__iexact=attributes["email"]).first()
+            elif User.__name__ != "EmailUser" and User.objects.filter(username__iexact=attributes["username"]).exists():
+                user = User.objects.filter(username__iexact=attributes["username"]).first()
             else:
                 user = User(last_login=timezone.localtime())
 
             # Set the user's details from the supplied information.
-            user.__dict__.update(attributemap)
-            user.save()
+            user_has_changed = False
+            for attr, value in attributes.items():
+                if getattr(user, attr) != value:
+                    setattr(user, attr, value)
+                    user_has_changed = True
+            if user_has_changed:
+                user.save()
+
             user.backend = "django.contrib.auth.backends.ModelBackend"
 
             # Log the user in.
