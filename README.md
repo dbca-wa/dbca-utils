@@ -4,8 +4,8 @@ DBCA Django utility classes and functions.
 
 ## Requirements
 
-- Python 3.10 or later
-- Django 4.2 or later
+- Python 3.12 or later
+- Django 5.2 or later
 
 ## Development
 
