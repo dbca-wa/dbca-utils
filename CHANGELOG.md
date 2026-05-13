@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.2.0 (2026-05-13)
+
+- Drop support for Python 3.10 and 3.11, add support for Python 3.14.
+- Drop support for Django 4.2 and 5.0, add support for Django 6.0.
+
 ## 2.1.5 (2025-10-31)
 
 - Bugfix: `last_name` was incorrectly replaced by `first_name` in SSOLoginMiddleware.
