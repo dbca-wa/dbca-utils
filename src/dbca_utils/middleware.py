@@ -116,7 +116,7 @@ class SSOLoginMiddleware(MiddlewareMixin):
         # Security check: if the logged-in request user's email does not match the email
         # returned from Auth2, invalidate the current request session and force a new session
         # using the returned SSO values.
-        if request.user.is_authenticated and request.user.email != request.META["HTTP_X_EMAIL"]:
+        if request.user.is_authenticated and request.user.email != request.META.get("HTTP_X_EMAIL", ""):
             logout(request)
 
         # Request user is not authenticated locally: obtain user attributes from the request.META dict
@@ -128,7 +128,7 @@ class SSOLoginMiddleware(MiddlewareMixin):
                 "last_name": "HTTP_X_LAST_NAME",
                 "first_name": "HTTP_X_FIRST_NAME",
             }
-            attributes = {"email": "", "username": ""}
+            attributes = {"username": ""}
 
             for key, meta_value in attributemap.items():
                 if meta_value in request.META:
@@ -147,11 +147,15 @@ class SSOLoginMiddleware(MiddlewareMixin):
             # a list of strings, or a single string.
             if hasattr(settings, "ALLOWED_EMAIL_SUFFIXES") and settings.ALLOWED_EMAIL_SUFFIXES:
                 if isinstance(settings.ALLOWED_EMAIL_SUFFIXES, str):
-                    allowed_email_suffixes = list(settings.ALLOWED_EMAIL_SUFFIXES)
+                    # If configured as a string, ALLOWED_EMAIL_SUFFIXES must be a comma-separated list (single-item list is OK).
+                    allowed_email_suffixes = settings.ALLOWED_EMAIL_SUFFIXES.split(",")
                 else:
                     allowed_email_suffixes = settings.ALLOWED_EMAIL_SUFFIXES
+                # Validation: allowed_email_suffixes must be a list of strings.
+                if not (isinstance(allowed_email_suffixes, list) and all(isinstance(x, str) for x in allowed_email_suffixes)):
+                    raise ValueError("ALLOWED_EMAIL_SUFFIXES must be a list of strings")
                 # If the user email suffix is not in the allowed list, return a 404 response.
-                if not any([attributes["email"].lower().endswith(suffix) for suffix in allowed_email_suffixes]):
+                if not any([attributes["email"].lower().endswith(suffix.lower().strip()) for suffix in allowed_email_suffixes]):
                     return http.HttpResponseForbidden()
 
             # Check for an existing User instance.
