@@ -29,7 +29,7 @@ dependencies = ["django>=5.2,<6.2", "markupsafe>=3.0.3"]
 [project.urls]
 Homepage = "https://github.com/dbca-wa/dbca-utils"
 Repository = "https://github.com/dbca-wa/dbca-utils.git"
-Changelog = "https://github.com/dbca-wa/dbca-utils/blob/master/CHANGELOG.md"
+Changelog = "https://github.com/dbca-wa/dbca-utils/blob/main/CHANGELOG.md"
 GitHub = "https://github.com/dbca-wa/dbca-utils"
 
 [dependency-groups]
