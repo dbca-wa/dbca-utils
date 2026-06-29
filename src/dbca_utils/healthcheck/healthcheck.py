@@ -284,7 +284,7 @@ def save_workloads(workloads,unreached_servers=None):
                     workloads[item_version] += 1
 
                 #save the new workloads data
-                cache.set(key_workloads,workloads)
+                cache.set(key_workloads,workloads,timeout=None)
                 logger.debug("Successfully save the workloads:{}".format(str_workloads(workloads)))
                 return
             finally:
@@ -325,7 +325,7 @@ def save_assignedworkloads(assignedworkloads):
                     assignedworkloads[item_version] += 1
 
                 #save the new workloads data
-                cache.set(key_assignedworkloads,assignedworkloads)
+                cache.set(key_assignedworkloads,assignedworkloads,timeout=None)
                 logger.debug("Successfully save the assigned workloads:{}".format(assignedworkloads))
                 return
             finally:
