@@ -467,34 +467,34 @@ if WORKLOADS > 0 and WORKLOAD_DEPLOYMENT:
         logger.debug("Get assigned workloads:{}".format(assignedworkloads))
         datas = {}
         index = 0
-        reassigned_workloads = 0
+        reassign_workloads = 0
         for workloadname in WORKLOADNAMES:
             servername = assignedworkloads.get(workloadname)
             if not servername:
                 #workloadname is not assined to a server
-                reassigned_workloads += 1
+                reassign_workloads += 1
                 continue
 
             #workload name is assigned to a server
             if servername not in servers_res :
                 #the server is not available
-                reassigned_workloads += 1
+                reassign_workloads += 1
                 continue
 
             datas[servername] = servers_res[servername]
             if servers_res[servername][0] in OFFLINE_STATUSCODE_LIST:
                 #Related workload is offline, need to reassign another workload
-                reassigned_workloads += 1
+                reassign_workloads += 1
             del servers_res[servername]
 
         assignedworkloads_changed = False
-        if reassigned_workloads > 0:
+        if reassign_workloads > 0:
             #Some workloads are not assigned a workload name or are not available
             #Using the following to replace the exisint one with new one if possible
             #Step 1: Replace the unavailable server with a new one 
             #Step 2: Assign the new server to the missing assignedworkloads(missed in the assignedworkloads before)
             step = 0
-            while reassigned_workloads > 0:
+            while reassign_workloads > 0:
                 step += 1
                 for workloadname in WORKLOADNAMES:
                     servername = assignedworkloads.get(workloadname)
@@ -525,10 +525,10 @@ if WORKLOADS > 0 and WORKLOAD_DEPLOYMENT:
                         assignedworkloads_changed = True
 
                     if servers_res:
-                        reassigned_workloads -= 1
+                        reassign_workloads -= 1
                     else:
-                        reassigned_workloads = 0
-                    if reassigned_workloads == 0:
+                        reassign_workloads = 0
+                    if reassign_workloads == 0:
                         break
 
             if assignedworkloads_changed:
@@ -544,9 +544,12 @@ if WORKLOADS > 0 and WORKLOAD_DEPLOYMENT:
                 result[workloadname] = "Can't find an available host for this non-assigned host.registered workloads: {0}, assigned workloads:{1}".format(str_workloads(workloads),assignedworkloads)
             elif servername not in datas:
                 result[workloadname] = "Can't find an available host for this assigned offline host({2}).registered workloads: {0}, assigned workloads:{1}".format(str_workloads(workloads),assignedworkloads,servername)
-            else:
+            elif datas[servername][0] == 200:
                 result[workloadname] = datas[servername][1]
                 result[workloadname]["hostname"] = servername
+            else:
+                result[workloadname] = "{}: {}".format(servername,datas[servername][1])
+
 
         datas.clear()
 
