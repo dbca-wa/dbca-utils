@@ -73,3 +73,23 @@ MIDDLEWARE = [
 - `modifier` - FK to `AUTH_USER_MODEL`, used to record who the object was last modified by
 - `created` - a timestamp that is set on initial object save
 - `modified` - an auto-updating timestamp (on each object save)
+  
+## Healthcheck feature
+### Requirements
+  - Django 5.2 or later
+  - Declared the default cache and also the cache is shared by all pod instances
+  - The image has the command 'ps' which is used to collect the cpu and memory data
+    
+  ### Usage
+  - Install the app 'dbca_utils' in INSTALLED_APPS
+  - Service Configuration
+      - HEALTHCHECK_ENABLED: Optional. enable/disable the healthcheck service. default is 'true'
+      - PROCESS_FILTER: Optional. find the web app related processes from command 'ps aux'. default is '| grep python'
+      - CACHE_PREFIX: Optional. used as the prefix of the cache key. default is ''
+      - PORT: Optional. The listening port of the web application. default is '8080'
+      - WORKLOADS: Optional. Used if the web app has a fixed replicas.
+      - WORKLOAD_DEPLOYMENT: Optional. the workload is deployment if it is true; otherwise it is statefulset. default is 'true'
+      - WORKLOAD_FAILED_THRESHOLD: Optional. The number of continuous failed times to treat a pod is offline.
+  - Nginx Configuration.
+      - Add a location 'location /healthcheck/' and configure it to use basic auth in nginx.
+  - Access the url : https://xxx.dbca.wa.gov.au/healthcheck/healthdata to get the health json data
