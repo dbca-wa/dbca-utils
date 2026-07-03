@@ -31,7 +31,7 @@ wheels = [
 
 [[package]]
 name = "dbca-utils"
-version = "3.0.6"
+version = "3.0.7"
 source = { editable = "." }
 dependencies = [
     { name = "django" },

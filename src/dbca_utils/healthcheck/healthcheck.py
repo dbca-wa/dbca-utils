@@ -143,17 +143,17 @@ def get_persistent_volumes_data():
                         line = line.lower()
                         if line.startswith("filesystem") :
                             datarow = True
-                            continue
-                        source,target,size = line.split()
-                        size = int(size)
-                        source = source.lower()
-                        if source == "overlay":
-                            overlaysize = size
-                        elif source.startswith("//"):
-                            volumes.append(target)
-                        elif source.startswith("/dev/sd"):
-                            #the volume can be same filesystem as the volume 'overlay'
-                            volumesdata[target] = size
+                        continue
+                    source,target,size = line.split()
+                    size = int(size)
+                    source = source.lower()
+                    if source == "overlay":
+                        overlaysize = size
+                    elif source.startswith("//"):
+                        volumes.append(target)
+                    elif source.startswith("/dev/sd"):
+                        #the volume can be same filesystem as the volume 'overlay'
+                        volumesdata[target] = size
 
                 for k,v in volumesdata.items():
                     if v == overlaysize:
