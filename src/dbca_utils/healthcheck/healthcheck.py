@@ -33,6 +33,18 @@ if WORKLOADS < 0 :
     WORKLOADS = 0
 WORKLOAD_FAILED_THRESHOLD = int(os.environ.get("WORKLOAD_FAILED_THRESHOLD",2))
 
+WORKLOAD_VOLUMES = os.environ.get("WORKLOAD_VOLUMES","automatic")
+
+if not WORKLOAD_VOLUMES or WORKLOAD_VOLUMES.lower() in ("disabled","false"):
+    WORKLOAD_VOLUMES_ENABLED = False
+    WORKLOAD_VOLUMES = None
+elif WORKLOAD_VOLUMES.lower() == "automatic":
+    WORKLOAD_VOLUMES_ENABLED = True
+    WORKLOAD_VOLUMES = None
+else:
+    WORKLOAD_VOLUMES = [v.strip() for v in WORKLOAD_VOLUMES.split(",") if v.strip()]
+    WORKLOAD_VOLUMES_ENABLED = True if WORKLOAD_VOLUMES else False
+
 
 RANDOM_CHARS="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYA0123456789~!@#$%^&*()-_+=`{}[];':\",./<>?"
 RANDOM_CHARS_MAX_INDEX = len(RANDOM_CHARS) - 1
@@ -104,9 +116,96 @@ def unregister_webappprocess():
             logger.error("Failed to unregister the webapp process '{}({}).{}'.".format(hostname,ip,pid))
 
 
+GET_VOLUMEUSAGE_CMD = None
+def get_persistent_volumes_data():
+    global WORKLOAD_VOLUMES
+    global GET_VOLUMEUSAGE_CMD
+    try:
+        if WORKLOAD_VOLUMES == []:
+            return {}
+        elif GET_VOLUMEUSAGE_CMD:
+            cmd = GET_VOLUMEUSAGE_CMD
+        else:
+            if WORKLOAD_VOLUMES is None:
+                #not configured. should find them automatically,
+                #the detect logic is dedicated for kubenetes
+                cmd = 'df --output="source,target,size"'
+                result = subprocess.run(cmd,shell=True,capture_output=True,text=True)
+                volumes = []
+                datarow = False
+                volumesdata = {}
+                overlaysize = 0
+                for line in result.stdout.split("\n"):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if not datarow:
+                        line = line.lower()
+                        if line.startswith("filesystem") :
+                            datarow = True
+                            continue
+                        source,target,size = line.split()
+                        size = int(size)
+                        source = source.lower()
+                        if source == "overlay":
+                            overlaysize = size
+                        elif target.startswith("/dev/sd"):
+                            volumesdata[targer] = size
+                for k,v in volumesdata.items():
+                    if v == overlaysize:
+                        #the volume is the same volume as overlay
+                        continue
+                    volumes.append(k)
+
+                WORKLOAD_VOLUMES = volumes
+                if volumes:
+                    cmd = 'df --output="target,size,used" -BK  {}'.format(" ".join(volumes))
+                    GET_VOLUMEUSAGE_CMD = cmd
+                else:
+                    return {}
+            else:
+                volumes = WORKLOAD_VOLUMES
+                cmd = 'df --output="target,size,used" -BK  {}'.format(" ".join(volumes))
+    
+        result = subprocess.run(cmd,shell=True,capture_output=True,text=True)
+        volumesdata = {}
+        datarow = False
+        for line in result.stdout.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            if not datarow:
+                line = line.lower()
+                if line.startswith("mounted on") :
+                    datarow = True
+                continue
+            target,size,used = line.split()
+            size = int(size[:-1])
+            used = int(used[:-1])
+            if size / 1048576 >= 10:
+                #large than 10G, use 'G' as unit
+                volumesdata[target] = {"size":size/1048576,"used":used / 1048576,"pcent":100 * used/size,"unit":"G"} 
+            elif size / 1024 >= 10:
+                #large than 10M, use 'M' as unit
+                volumesdata[target] = {"size":size/1024,"used":used / 1024,"pcent":100 * used/size,"unit":"M"} 
+            else:
+                volumesdata[target] = {"size":size,"used":used,"pcent":100 * used/size} 
+    
+        if not GET_VOLUMEUSAGE_CMD:
+            #This is the first time to get the volume usage, delete the non-exist volume from volumes
+            for i in range(len(volumes) - 1,-1,-1):
+                if volumes[i] not in volumesdata:
+                    del volumes[i]
+            WORKLOAD_VOLUMES = volumes
+            GET_VOLUMEUSAGE_CMD = 'df --output="target,size,used" -BK  {}'.format(" ".join(volumes))
+        return volumesdata
+    except Exception as ex:
+        return "Failed to volumes usage data.{}: {}".format(ex.__class__.__name__,str(ex))
+
 item_version = "__version__"
 key_workloads = "{}__workloads__".format(CACHE_PREFIX)
 key_workloads_lock = "{}lock__".format(key_workloads)
+
 
 def register_webappserver(sender,environ,**kwargs):
     """
@@ -234,6 +333,8 @@ def get_workload_healthcheckdata():
         if result["max_pmemory"] is None or result["max_pmemory"] < data[2]:
             result["max_pmemory"] = data[2]
 
+    if WORKLOAD_VOLUMES_ENABLED:
+        result["volumes"] = get_persistent_volumes_data()
     return (200,result)
 
 bearer_token_re = re.compile("^Bearer\\s+(?P<token>\\S+)\\s*$")
