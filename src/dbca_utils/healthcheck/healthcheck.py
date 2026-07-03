@@ -149,8 +149,12 @@ def get_persistent_volumes_data():
                         source = source.lower()
                         if source == "overlay":
                             overlaysize = size
+                        elif target.startswith("//"):
+                            volumes.append(target)
                         elif target.startswith("/dev/sd"):
-                            volumesdata[targer] = size
+                            #the volume can be same filesystem as the volume 'overlay'
+                            volumesdata[target] = size
+
                 for k,v in volumesdata.items():
                     if v == overlaysize:
                         #the volume is the same volume as overlay
