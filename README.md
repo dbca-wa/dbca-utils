@@ -84,7 +84,6 @@ MIDDLEWARE = [
   - Install the app 'dbca_utils' in INSTALLED_APPS
   - Service Configuration
       - HEALTHCHECK_ENABLED: Optional. enable/disable the healthcheck service. default is 'true'
-      - PROCESS_FILTER: Optional. find the web app related processes from command 'ps aux'. default is '| grep python'
       - CACHE_PREFIX: Optional. used as the prefix WORKLOAD_VOLUMESof WORKLOAD_VOLUMESthe cache key. default is ''
       - PORT: Optional. The listening port of the web application. default is '8080'
       - WORKLOADS: Optional. Used if the web app has a fixed replicas.
@@ -94,6 +93,8 @@ MIDDLEWARE = [
           - disabled|false: Don't harvest volume usage data
           - automatic: Detect the persistent volume automatically.
           - "," separated volume mounted points: the volume list
+      - HEALTHCHECK_SYSTEMDATA_ENABLED: Enable system resource data
+      - HEALTHCHECK_PROCESSDATA_ENABLED: Enable process resource data
   - Nginx Configuration.
       - Add a location 'location /healthcheck/' and configure it to use basic auth in nginx.
   - Access the url : https://xxx.dbca.wa.gov.au/healthcheck/healthdata to get the health json data
