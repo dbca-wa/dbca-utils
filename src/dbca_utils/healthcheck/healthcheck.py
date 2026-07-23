@@ -1,6 +1,7 @@
 import os
 import importlib
 import logging
+import psutil
 import subprocess
 import random
 import re
@@ -10,6 +11,7 @@ import requests
 from datetime import datetime
 
 from django.urls import reverse,path,include
+from django.utils import timezone
 from django.conf import settings
 from django.http import HttpResponseForbidden, JsonResponse,HttpResponseServerError
 from django.core.signals import request_started
@@ -24,7 +26,9 @@ HEALTHCHECK_ENABLED = os.environ.get("HEALTHCHECK_ENABLED","true").lower() == "t
 if not HEALTHCHECK_ENABLED:
     HEALTHCHECK_ENABLED = True if cache else None
 
-PROCESS_FILTER = os.environ.get("WORKLOAD_PROCESS_FILTER","| grep python")
+HEALTHCHECK_SYSTEMDATA_ENABLED = os.environ.get("HEALTHCHECK_SYSTEMDATA_ENABLED","true").lower() == "true"
+HEALTHCHECK_PROCESSDATA_ENABLED = os.environ.get("HEALTHCHECK_PROCESSDATA_ENABLED","true").lower() == "true"
+
 CACHE_PREFIX = os.environ.get("CACHE_PREFIX","")
 PORT = int(os.environ.get("WORKLOAD_PORT",8080))
 WORKLOADS = int(os.environ.get("WORKLOADS",0))
@@ -80,138 +84,11 @@ else:
 
 ip = get_local_ip()
 
-webapp_process_registerfolder = "/tmp/__webapp__/proc"
-
-def get_processregisterfile(pid):
-    return os.path.join(webapp_process_registerfolder,str(pid))
-
-
-def register_webappprocess():
-    """
-    Register all webapp related processes 
-    Healthcheck will use the processes to calculate the resources used by webapp
-    """
-    pid = os.getpid()
-    logger.debug("Register the webapp process '{}({}).{}'.".format(hostname,ip,pid))
-    try:
-        if not os.path.exists(webapp_process_registerfolder):
-            os.makedirs(webapp_process_registerfolder)
-
-        registerfile = get_processregisterfile(pid)
-        #register the webapp process first
-        with open(registerfile,"wt") as f:
-            f.write(datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f"))
-    except Exception as ex:
-        logger.error("Failed to register the webapp process '{}({}).{}'.".format(hostname,ip,pid))
-
-def unregister_webappprocess():
-    pid = os.getpid()
-    logger.debug("Unregister the webapp process '{}({}).{}'.".format(hostname,ip,pid))
-    try:
-        registerfile = get_processregisterfile(pid)
-        #register the webapp process first
-        os.remove(registerfile)
-    except Exception as ex:
-        if os.path.exists(registerfile):
-            logger.error("Failed to unregister the webapp process '{}({}).{}'.".format(hostname,ip,pid))
-
-
-GET_VOLUMEUSAGE_CMD = None
-def get_persistent_volumes_data():
-    global WORKLOAD_VOLUMES
-    global GET_VOLUMEUSAGE_CMD
-    try:
-        if WORKLOAD_VOLUMES == []:
-            return {}
-        elif GET_VOLUMEUSAGE_CMD:
-            cmd = GET_VOLUMEUSAGE_CMD
-        else:
-            if WORKLOAD_VOLUMES is None:
-                #not configured. should find them automatically,
-                #the detect logic is dedicated for kubenetes
-                cmd = 'df --output="source,target,size"'
-                result = subprocess.run(cmd,shell=True,capture_output=True,text=True)
-                volumes = []
-                datarow = False
-                volumesdata = {}
-                overlaysize = 0
-                for line in result.stdout.split("\n"):
-                    line = line.strip()
-                    if not line:
-                        continue
-                    if not datarow:
-                        line = line.lower()
-                        if line.startswith("filesystem") :
-                            datarow = True
-                        continue
-                    source,target,size = line.split()
-                    size = int(size)
-                    source = source.lower()
-                    if source == "overlay":
-                        overlaysize = size
-                    elif source.startswith("//"):
-                        volumes.append(target)
-                    elif source.startswith("/dev/sd"):
-                        #the volume can be same filesystem as the volume 'overlay'
-                        volumesdata[target] = size
-
-                for k,v in volumesdata.items():
-                    if v == overlaysize:
-                        #the volume is the same volume as overlay
-                        continue
-                    volumes.append(k)
-
-                WORKLOAD_VOLUMES = volumes
-                if volumes:
-                    cmd = 'df --output="target,size,used" -BK  {}'.format(" ".join(volumes))
-                    GET_VOLUMEUSAGE_CMD = cmd
-                else:
-                    return {}
-            else:
-                volumes = WORKLOAD_VOLUMES
-                cmd = 'df --output="target,size,used" -BK  {}'.format(" ".join(volumes))
-    
-        result = subprocess.run(cmd,shell=True,capture_output=True,text=True)
-        volumesdata = {}
-        datarow = False
-        for line in result.stdout.split("\n"):
-            line = line.strip()
-            if not line:
-                continue
-            if not datarow:
-                line = line.lower()
-                if line.startswith("mounted on") :
-                    datarow = True
-                continue
-            target,size,used = line.split()
-            size = int(size[:-1])
-            used = int(used[:-1])
-            if size / 1048576 >= 10:
-                #large than 10G, use 'G' as unit
-                volumesdata[target] = {"size":size/1048576,"used":used / 1048576,"pcent":100 * used/size,"unit":"G"} 
-            elif size / 1024 >= 10:
-                #large than 10M, use 'M' as unit
-                volumesdata[target] = {"size":size/1024,"used":used / 1024,"pcent":100 * used/size,"unit":"M"} 
-            else:
-                volumesdata[target] = {"size":size,"used":used,"pcent":100 * used/size} 
-    
-        if not GET_VOLUMEUSAGE_CMD:
-            #This is the first time to get the volume usage, delete the non-exist volume from volumes
-            for i in range(len(volumes) - 1,-1,-1):
-                if volumes[i] not in volumesdata:
-                    del volumes[i]
-            WORKLOAD_VOLUMES = volumes
-            GET_VOLUMEUSAGE_CMD = 'df --output="target,size,used" -BK  {}'.format(" ".join(volumes))
-        return volumesdata
-    except Exception as ex:
-        return "Failed to volumes usage data.{}: {}".format(ex.__class__.__name__,str(ex))
-
 item_version = "__version__"
 key_workloads = "{}__workloads__".format(CACHE_PREFIX)
 key_workloads_lock = "{}lock__".format(key_workloads)
 
-
-def register_webappserver(sender,environ,**kwargs):
+def register_webappserver(sender,*args,**kwargs):
     """
     Register a web server running in the same workload
     1. Write a server register file in workload's local file system
@@ -279,66 +156,180 @@ if HEALTHCHECK_ENABLED:
     #healthcheck is not initied
     request_started.connect(register_webappserver,dispatch_uid="register_webappserver")
 
-GET_RESOURCEUSAGE_CMD = "ps ax -o %cpu=,vsz=,rss=,cmd= {}".format(PROCESS_FILTER).strip()
-GET_RESOURCEUSAGE_PIPECMDS = [c.strip() for c in GET_RESOURCEUSAGE_CMD.split("|")]
 
-def get_workload_healthcheckdata():
-    #find all running web app processes
-    #find the resource usage for all processes
-    result = subprocess.run(GET_RESOURCEUSAGE_CMD,shell=True,capture_output=True,text=True)
-    if result.returncode != 0:
-        return (500,"Failed to get the resource usage data for webapp processes.{}".format(result.stderr))
+VALID_WORKLOAD_VOLUMES = None
+def get_volumes_healthdata():
+    global VALID_WORKLOAD_VOLUMES
+    try:
+        if VALID_WORKLOAD_VOLUMES is None:
+            volumes = []
+            for partition in psutil.disk_partitions(all=True):
+                if WORKLOAD_VOLUMES is None:
+                    if partition.fstype.lower() not in ("cifs","nfs","sshfs","davfs2"):
+                        continue
+                    volumes.append(partition.mountpoint)
+                elif partition.mountpoint in WORKLOAD_VOLUMES:
+                    volumes.append(partition.mountpoint)
 
-    processesdata = []
-    for line in result.stdout.split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        if any(c in line for c in GET_RESOURCEUSAGE_PIPECMDS):
-            continue
-        data = line.split(maxsplit=3)
-        data[0] = float(data[0])
-        data[1] = float(data[1]) / 1024
-        data[2] = float(data[2]) / 1024
-        del data[3]
-        processesdata.append(data)
+            VALID_WORKLOAD_VOLUMES = volumes
 
-    #populate the resource data
-    result = {
-        "total_cpu":0,
-        "total_vmemory":0,
-        "total_pmemory":0,
-        "processes":0,
-        "min_cpu":None,
-        "max_cpu":None,
-        "min_vmemory":None,
-        "max_vmemory":None,
-        "min_pmemory":None,
-        "max_pmemory":None
+        if not VALID_WORKLOAD_VOLUMES:
+            return {}
+
+        volumesdata = {}
+        for volume in VALID_WORKLOAD_VOLUMES:
+            diskusage  = psutil.disk_usage(volume)
+            if diskusage.total / 1073741824 >= 10:
+                #large than 10G, use 'G' as unit
+                volumesdata[volume] = {"size":round(diskusage.total / 1073741824),"used":round(diskusage.used / 1073741824),"pcent":100 * diskusage.used/diskusage.total,"unit":"G"} 
+            elif diskusage.total / 1048576 >= 10:
+                #large than 10M, use 'M' as unit
+                volumesdata[volume] = {"size":round(diskusage.total / 1048576),"used":round(diskusage.used / 1048576),"pcent":100 * diskusage.used/diskusage.total,"unit":"M"} 
+            else:
+                volumesdata[volume] = {"size":round(diskusage.total / 1024),"used":round(diskusage.used / 1024),"pcent":100 * diskusage.used/diskusage.total,"unit":"K"} 
+
+        return volumesdata
+    except Exception as ex:
+        import traceback;
+        traceback.print_exc()
+        return "Failed to volumes usage data.{}: {}".format(ex.__class__.__name__,str(ex))
+
+def get_workload_system_healthdata():
+    cpu_pcent = system_cpu_pcents = psutil.cpu_percent(percpu=False)
+    cpucores_pcent = system_cpu_pcents = psutil.cpu_percent(percpu=True)
+    memoryinfo = psutil.virtual_memory()
+    netio = psutil.net_io_counters()
+
+    return {
+        "cpu_pcent":cpu_pcent,
+        "cpucores_pcent":cpucores_pcent,
+        "memory_total": memoryinfo.total / 1073741824,
+        "memory_used": (memoryinfo.total - memoryinfo.available) / 1073741824,
+        "memory_pcent": (memoryinfo.total - memoryinfo.available) * 100 / memoryinfo.total,
+        "bytes_sent": netio.bytes_sent,
+        "bytes_recv": netio.bytes_recv
     }
-    for data in processesdata:
-        result["total_cpu"] += data[0]
-        result["total_vmemory"] += data[1]
-        result["total_pmemory"] += data[2]
-        result["processes"] += 1
 
-        if result["min_cpu"] is None or result["min_cpu"] > data[0]:
-            result["min_cpu"] = data[0]
-        if result["max_cpu"] is None or result["max_cpu"] < data[0]:
-            result["max_cpu"] = data[0]
+def get_process_healthdata(proc):
+    memoryinfo = proc.memory_info()
+    result = {
+        "start_time":timezone.make_aware(datetime.fromtimestamp(proc.create_time())).strftime("%Y-%m-%dT%H:%M:%S"),
+        "cmdline":proc.cmdline(),
+        "cpu_num": proc.cpu_num(),
+        "cpu_pcent": proc.cpu_percent(),
+        "pmemory":memoryinfo.rss / 1048576,
+        "vmemory":memoryinfo.vms / 1048576
+    }
+    if proc.pid == curprocpid:
+        result["currentprocess"] = True
+    return result
 
-        if result["min_vmemory"] is None or result["min_vmemory"] > data[1]:
-            result["min_vmemory"] = data[1]
-        if result["max_vmemory"] is None or result["max_vmemory"] < data[1]:
-            result["max_vmemory"] = data[1]
+rootproc = None
+curprocpid = None
+def get_workload_app_healthdata(perprocess=True):
+    """
+    All processes belonging to the webapp should have
+    1. same parent process
+    2. the cmdline of all processes should be same
+    """
+    global rootproc
+    global curprocpid
+    if not curprocpid:
+        curprocpid = os.getpid()
 
-        if result["min_pmemory"] is None or result["min_pmemory"] > data[2]:
-            result["min_pmemory"] = data[2]
-        if result["max_pmemory"] is None or result["max_pmemory"] < data[2]:
-            result["max_pmemory"] = data[2]
+    if not rootproc:
+        #the the root proc
+        #get the pid of the current process
+        curproc = psutil.Process(curprocpid)
+        #find the parent
+        pproc = curproc
+        rootproc = None
+        app_cmdline = curproc.cmdline()
+        while not rootproc:
+            ppid = pproc.ppid()
+            if not ppid:
+                rootproc = pproc
+                continue
+    
+            tmpproc = psutil.Process(ppid)
+            tmpproc_cmdline = tmpproc.cmdline()
+            if tmpproc_cmdline == app_cmdline:
+                #the pproc has the same cmd line as current proc. the pproc is also related app python process
+                pproc = tmpproc
+            elif any(any(key in p for key in ("python","gunicorn","uwsgi","django")) for p in tmpproc_cmdline):
+                #the pproc is still the python process.
+                pproc = tmpproc
+            else:
+                rootproc = pproc
+
+
+    #find all realted processes and its health data
+    rootproc_data = get_process_healthdata(rootproc)
+    result = {
+        "start_time": rootproc_data["start_time"],
+        "cpu_total" : rootproc_data["cpu_pcent"],
+        "cpu_min" : rootproc_data["cpu_pcent"],
+        "cpu_max" : rootproc_data["cpu_pcent"],
+        "pmemory_total" : rootproc_data["pmemory"],
+        "pmemory_min" : rootproc_data["pmemory"],
+        "pmemory_max" : rootproc_data["pmemory"],
+        "vmemory_total" : rootproc_data["vmemory"],
+        "vmemory_min" : rootproc_data["vmemory"],
+        "vmemory_max" : rootproc_data["vmemory"],
+        "processes" : 1
+    }
+    if perprocess:
+        result["process"] = rootproc_data
+        result["process"]["children"] = []
+
+    processes = [(rootproc.children(),result["process"]["children"] if perprocess else None)]
+    while processes:
+        childproces,childrendatas = processes.pop(0)
+        for childproc in childproces:
+            childproc_data = get_process_healthdata(childproc)
+
+            result["cpu_total"] += childproc_data["cpu_pcent"]
+            if result["cpu_min"] > childproc_data["cpu_pcent"]:
+                result["cpu_min"] = childproc_data["cpu_pcent"]
+            if result["cpu_max"] < childproc_data["cpu_pcent"]:
+                result["cpu_max"] = childproc_data["cpu_pcent"]
+
+            result["pmemory_total"] += childproc_data["pmemory"]
+            if result["pmemory_min"] > childproc_data["pmemory"]:
+                result["pmemory_min"] = childproc_data["pmemory"]
+            if result["pmemory_max"] < childproc_data["pmemory"]:
+                result["pmemory_max"] = childproc_data["pmemory"]
+
+            result["vmemory_total"] += childproc_data["vmemory"]
+            if result["vmemory_min"] > childproc_data["vmemory"]:
+                result["vmemory_min"] = childproc_data["vmemory"]
+            if result["vmemory_max"] < childproc_data["vmemory"]:
+                result["vmemory_max"] = childproc_data["vmemory"]
+
+            result["processes"] += 1
+
+            if perprocess:
+                childrendatas.append(childproc_data)
+
+            childproc_children = childproc.children()
+            if childproc_children:
+                if perprocess:
+                    childproc_data["children"] = []
+                processes.append((childproc_children,childproc_data["children"] if perprocess else None))
+
+    return result
+
+def get_workload_healthdata():
+
+    result = {
+        "resources": get_workload_app_healthdata(HEALTHCHECK_PROCESSDATA_ENABLED)
+    }
+    if HEALTHCHECK_SYSTEMDATA_ENABLED:
+        result["system"] = get_workload_system_healthdata()
 
     if WORKLOAD_VOLUMES_ENABLED:
-        result["volumes"] = get_persistent_volumes_data()
+        result["volumes"] = get_volumes_healthdata()
+
     return (200,result)
 
 bearer_token_re = re.compile("^Bearer\\s+(?P<token>\\S+)\\s*$")
@@ -446,43 +437,64 @@ def populate_summary_data(datas):
     Populate the resource summary data from workloads' resource usage data
     """
     summary = {
-        "total_cpu":0,
-        "total_vmemory":0,
-        "total_pmemory":0,
-        "total_processes":0,
-        "running_workloads":0,
-        "failed_workloads":0,
-        "min_process_cpu":None,
-        "max_process_cpu":None,
-        "min_process_vmemory":None,
-        "max_process_vmemory":None,
-        "min_process_pmemory":None,
-        "max_process_pmemory":None
+        "cpu_total":0,
+        "cpu_min":None,
+        "cpu_max":None,
+        "process_cpu_min":None,
+        "process_cpu_max":None,
+        "pmemory_total":0,
+        "pmemory_min":None,
+        "pmemory_max":None,
+        "process_pmemory_min":None,
+        "process_pmemory_max":None,
+        "vmemory_total":0,
+        "vmemory_min":None,
+        "vmemory_max":None,
+        "process_vmemory_min":None,
+        "process_vmemory_max":None,
+        "processes_total":0,
+        "workloads_running":0,
+        "workloads_failed":0,
     }
     for servername,serverdata in datas.items():
         if isinstance(serverdata,str):
-            summary["failed_workloads"] += 1
+            summary["workloads_failed"] += 1
             continue
-        summary["running_workloads"] += 1
-        summary["total_cpu"] += serverdata["total_cpu"]
-        summary["total_vmemory"] += serverdata["total_vmemory"]
-        summary["total_pmemory"] += serverdata["total_pmemory"]
-        summary["total_processes"] += serverdata["processes"]
+        summary["processes_total"] += serverdata["resources"]["processes"]
 
-        if summary["min_process_cpu"] is None or summary["min_process_cpu"] > serverdata["min_cpu"]:
-            summary["min_process_cpu"] = serverdata["min_cpu"]
-        if summary["max_process_cpu"] is None or summary["max_process_cpu"] < serverdata["max_cpu"]:
-            summary["max_process_cpu"] = serverdata["max_cpu"]
+        summary["cpu_total"] += serverdata["resources"]["cpu_total"]
 
-        if summary["min_process_vmemory"] is None or summary["min_process_vmemory"] > serverdata["min_vmemory"]:
-            summary["min_process_vmemory"] = serverdata["min_vmemory"]
-        if summary["max_process_vmemory"] is None or summary["max_process_vmemory"] < serverdata["max_vmemory"]:
-            summary["max_process_vmemory"] = serverdata["max_vmemory"]
+        summary["cpu_total"] += serverdata["resources"]["cpu_total"]
+        if summary["cpu_min"] is None or summary["cpu_min"] > serverdata["resources"]["cpu_total"]:
+            summary["cpu_min"] = serverdata["resources"]["cpu_total"]
+        if summary["cpu_max"] is None or summary["cpu_max"] < serverdata["resources"]["cpu_total"]:
+            summary["cpu_max"] = serverdata["resources"]["cpu_total"]
+        if summary["process_cpu_min"] is None or summary["process_cpu_min"] > serverdata["resources"]["cpu_min"]:
+            summary["process_cpu_min"] = serverdata["resources"]["cpu_min"]
+        if summary["process_cpu_max"] is None or summary["process_cpu_max"] < serverdata["resources"]["cpu_max"]:
+            summary["process_cpu_max"] = serverdata["resources"]["cpu_max"]
 
-        if summary["min_process_pmemory"] is None or summary["min_process_pmemory"] > serverdata["min_pmemory"]:
-            summary["min_process_pmemory"] = serverdata["min_pmemory"]
-        if summary["max_process_pmemory"] is None or summary["max_process_pmemory"] < serverdata["max_pmemory"]:
-            summary["max_process_pmemory"] = serverdata["max_pmemory"]
+        summary["pmemory_total"] += serverdata["resources"]["pmemory_total"]
+        if summary["pmemory_min"] is None or summary["pmemory_min"] > serverdata["resources"]["pmemory_total"]:
+            summary["pmemory_min"] = serverdata["resources"]["pmemory_total"]
+        if summary["pmemory_max"] is None or summary["pmemory_max"] < serverdata["resources"]["pmemory_total"]:
+            summary["pmemory_max"] = serverdata["resources"]["pmemory_total"]
+        if summary["process_pmemory_min"] is None or summary["process_pmemory_min"] > serverdata["resources"]["pmemory_min"]:
+            summary["process_pmemory_min"] = serverdata["resources"]["pmemory_min"]
+        if summary["process_pmemory_max"] is None or summary["process_pmemory_max"] < serverdata["resources"]["pmemory_max"]:
+            summary["process_pmemory_max"] = serverdata["resources"]["pmemory_max"]
+
+        summary["vmemory_total"] += serverdata["resources"]["vmemory_total"]
+        if summary["vmemory_min"] is None or summary["vmemory_min"] > serverdata["resources"]["vmemory_total"]:
+            summary["vmemory_min"] = serverdata["resources"]["vmemory_total"]
+        if summary["vmemory_max"] is None or summary["vmemory_max"] < serverdata["resources"]["vmemory_total"]:
+            summary["vmemory_max"] = serverdata["resources"]["vmemory_total"]
+        if summary["process_vmemory_min"] is None or summary["process_vmemory_min"] > serverdata["resources"]["vmemory_min"]:
+            summary["process_vmemory_min"] = serverdata["resources"]["vmemory_min"]
+        if summary["process_vmemory_max"] is None or summary["process_vmemory_max"] < serverdata["resources"]["vmemory_max"]:
+            summary["process_vmemory_max"] = serverdata["resources"]["vmemory_max"]
+
+        summary["workloads_running"] += 1
 
     datas["summary"] = summary
 
@@ -512,7 +524,7 @@ def harvest_healthdata(request):
         if servername == item_version:
             continue
         if servername == registerhostname:
-            servers_res[servername] = get_workload_healthcheckdata()
+            servers_res[servername] = get_workload_healthdata()
             continue
 
         serverip,port = serverdata[0]
@@ -544,24 +556,33 @@ def harvest_healthdata(request):
             if serverdata[2] > 0:
                 serverdata[2] -= 1
                 workloads_changed = True
-        else:
-            #the server is online, but running into error, add the error message to servers_res
-            servers_res[servername] = (res.status_code,"{1}: {2}. url={0}".format(res.status_code,res.text,url))
-            if serverdata[2] > 0:
-                serverdata[2] -= 1
+        elif res.status_code == 599:
+            #the server is in good health, add the health data to servers_res
+            data = res.json()
+            if data["status"] == 401:
+                #authentication error, caused by different workload.
                 workloads_changed = True
+                unreached_servers.append(servername)
+                servers_res[servername] = (res.status_code,"{1}:{2},url={0}".format(url,data["status"],data["message"]))
+            else:
+                servers_res[servername] = (res.status_code,"{1}:{2}. url={0}".format(url,data["status"],data["message"]))
+        else:
+            #unexpected error, caused by different workload
+            workloads_changed = True
+            unreached_servers.append(servername)
+            servers_res[servername] = (res.status_code,"{1}:{2},url={0}".format(url,res.status_code,res.text))
 
     for servername in unreached_servers:
         del workloads[servername]
 
-    logger.debug("healthdata harvest result :{}".format(servers_res))
+    logger.debug("healthdata harvest result :workloads={}, resources={}".format(workloads,servers_res))
 
     if workloads_changed:
         save_workloads(workloads,unreached_servers)
 
     return (workloads,servers_res)
 
-OFFLINE_STATUSCODE_LIST = (502,503,504,-1,-2)
+OFFLINE_STATUSCODE_LIST = (502,503,504,401,403,-1,-2)
 if WORKLOADS > 0 and WORKLOAD_DEPLOYMENT:
     #has a fixed number of workloads and it is a deployment
     WORKLOADNAMES = [get_workloadname(index) for index in range(WORKLOADS)]
@@ -593,6 +614,14 @@ if WORKLOADS > 0 and WORKLOAD_DEPLOYMENT:
             del servers_res[servername]
 
         assignedworkloads_changed = False
+        if len(WORKLOADNAMES) != len(assignedworkloads):
+            for key in [k for k in assignedworkloads.keys()]:
+                if key == item_version:
+                    continue
+                if key not in WORKLOADNAMES:
+                    assignedworkloads_changed = True
+                    del assignedworkloads[key]
+
         if reassign_workloads > 0:
             #Some workloads are not assigned a workload name or are not available
             #Using the following to replace the exisint one with new one if possible
@@ -691,24 +720,27 @@ else:
 
 def workload_healthdata_view(request):
     global secret
-    token = get_auth_bearer(request)
-    if not token:
-        return HttpResponseForbidden("Missing access token")
-
-    if not secret or secret != token:
-        workloads = cache.get(key_workloads)
-        data = workloads.get(registerhostname)
-        if data:
-            secret = data[1]
-        
-        if secret != token:
-            return HttpResponseForbidden("Access token doesn't match")
-
-    statuscode,data = get_workload_healthcheckdata()
-    if statuscode == 200:
-        return JsonResponse(data)
-    else:
-        return HttpResponseServerError(data)
+    try:
+        token = get_auth_bearer(request)
+        if not token:
+            return JsonResponse({"status":401,"message":"Missing access token."},status=599)
+    
+        if not secret or secret != token:
+            workloads = cache.get(key_workloads)
+            data = workloads.get(registerhostname)
+            if data:
+                secret = data[1]
+            
+            if secret != token:
+                return JsonResponse({"status":401,"message":"Access token doesn't match."},status=599)
+    
+        statuscode,data = get_workload_healthdata()
+        if statuscode == 200:
+            return JsonResponse(data)
+        else:
+            return JsonResponse({"status":500,"message":"Server Error"},status=599)
+    except Exception as ex:
+        return JsonResponse({"status":500,"message":"{}:{}".format(ex.__class__.__name__,str(ex))},status=599)
 
 def register_healtcheckurls():
     #Add urls
