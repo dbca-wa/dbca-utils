@@ -88,7 +88,7 @@ item_version = "__version__"
 key_workloads = "{}__workloads__".format(CACHE_PREFIX)
 key_workloads_lock = "{}lock__".format(key_workloads)
 
-def register_webappserver(sender,*args,**kwargs):
+def register_webappserver(*args,**kwargs):
     """
     Register a web server running in the same workload
     1. Write a server register file in workload's local file system
@@ -214,14 +214,16 @@ def get_process_healthdata(proc):
     memoryinfo = proc.memory_info()
     result = {
         "start_time":timezone.make_aware(datetime.fromtimestamp(proc.create_time())).strftime("%Y-%m-%dT%H:%M:%S"),
-        "cmdline":proc.cmdline(),
         "cpu_num": proc.cpu_num(),
         "cpu_pcent": proc.cpu_percent(),
         "pmemory":memoryinfo.rss / 1048576,
         "vmemory":memoryinfo.vms / 1048576
     }
-    if proc.pid == curprocpid:
-        result["currentprocess"] = True
+    if settings.DEBUG:
+        result["cmdline"] = proc.cmdline()
+        if proc.pid == curprocpid:
+            result["currentprocess"] = True
+
     return result
 
 rootproc = None
@@ -525,6 +527,8 @@ def harvest_healthdata(request):
             continue
         if servername == registerhostname:
             servers_res[servername] = get_workload_healthdata()
+            if settings.DEBUG:
+                servers_res[servername]["currentworkload"] = True
             continue
 
         serverip,port = serverdata[0]
