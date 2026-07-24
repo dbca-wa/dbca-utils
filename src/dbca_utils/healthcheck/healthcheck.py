@@ -322,17 +322,19 @@ def get_workload_app_healthdata(perprocess=True):
     return result
 
 def get_workload_healthdata():
+    try:
+        result = {
+            "resources": get_workload_app_healthdata(HEALTHCHECK_PROCESSDATA_ENABLED)
+        }
+        if HEALTHCHECK_SYSTEMDATA_ENABLED:
+            result["system"] = get_workload_system_healthdata()
 
-    result = {
-        "resources": get_workload_app_healthdata(HEALTHCHECK_PROCESSDATA_ENABLED)
-    }
-    if HEALTHCHECK_SYSTEMDATA_ENABLED:
-        result["system"] = get_workload_system_healthdata()
+        if WORKLOAD_VOLUMES_ENABLED:
+            result["volumes"] = get_volumes_healthdata()
 
-    if WORKLOAD_VOLUMES_ENABLED:
-        result["volumes"] = get_volumes_healthdata()
-
-    return (200,result)
+        return (200,result)
+    except Exception as ex:
+        return (500,"{}:{}".format(ex.__classs__.__name__,str(ex)))
 
 bearer_token_re = re.compile("^Bearer\\s+(?P<token>\\S+)\\s*$")
 def get_auth_bearer(request):
@@ -458,6 +460,9 @@ def populate_summary_data(datas):
         "workloads_running":0,
         "workloads_failed":0,
     }
+    if settings.DEBUG:
+        summary["currentworkload"] = registerhostname
+
     for servername,serverdata in datas.items():
         if isinstance(serverdata,str):
             summary["workloads_failed"] += 1
@@ -527,8 +532,6 @@ def harvest_healthdata(request):
             continue
         if servername == registerhostname:
             servers_res[servername] = get_workload_healthdata()
-            if settings.DEBUG:
-                servers_res[servername]["currentworkload"] = True
             continue
 
         serverip,port = serverdata[0]
@@ -742,7 +745,7 @@ def workload_healthdata_view(request):
         if statuscode == 200:
             return JsonResponse(data)
         else:
-            return JsonResponse({"status":500,"message":"Server Error"},status=599)
+            return JsonResponse({"status":statuscode,"message":data},status=599)
     except Exception as ex:
         return JsonResponse({"status":500,"message":"{}:{}".format(ex.__class__.__name__,str(ex))},status=599)
 
