@@ -52,6 +52,42 @@ build-backend = "pdm.backend"
 [tool.uv]
 package = true
 
+[tool.tox]
+requires = ["tox>=4", "tox-uv>=1.35.0"]
+env_list = [
+    "py312-dj52",
+    "py313-dj52",
+    "py314-dj52",
+    "py312-dj60",
+    "py313-dj60",
+    "py314-dj60",
+]
+
+[tool.tox.env_run_base]
+runner = "uv-venv-lock-runner"
+description = "Run the tests with pytest"
+deps = ["pytest-django"]
+setenv = { PYTHONWARNINGS = "all" }
+commands = [["pytest", "-v"]]
+
+[tool.tox.env.py312-dj52]
+deps = ["Django>=5.2,<6"]
+
+[tool.tox.env.py313-dj52]
+deps = ["Django>=5.2,<6"]
+
+[tool.tox.env.py314-dj52]
+deps = ["Django>=5.2,<6"]
+
+[tool.tox.env.py312-dj60]
+deps = ["Django>=6,<6.2"]
+
+[tool.tox.env.py313-dj60]
+deps = ["Django>=6,<6.2"]
+
+[tool.tox.env.py314-dj60]
+deps = ["Django>=6,<6.2"]
+
 [tool.pytest.ini_options]
 # https://pytest-django.readthedocs.io/en/latest/configuring_django.html#pyproject-toml-settings
 DJANGO_SETTINGS_MODULE = "tests.settings"
