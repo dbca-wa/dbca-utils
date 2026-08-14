@@ -64,29 +64,34 @@ env_list = [
 ]
 
 [tool.tox.env_run_base]
-runner = "uv-venv-lock-runner"
+runner = "uv-venv-runner"
 description = "Run the tests with pytest"
-deps = ["pytest-django"]
 setenv = { PYTHONWARNINGS = "all" }
 commands = [["pytest", "-v"]]
 
 [tool.tox.env.py312-dj52]
-deps = ["Django>=5.2,<6"]
+base_python = "python3.12"
+deps = ["pytest-django", "Django>=5.2,<6"]
 
 [tool.tox.env.py313-dj52]
-deps = ["Django>=5.2,<6"]
+base_python = "python3.13"
+deps = ["pytest-django", "Django>=5.2,<6"]
 
 [tool.tox.env.py314-dj52]
-deps = ["Django>=5.2,<6"]
+base_python = "python3.14"
+deps = ["pytest-django", "Django>=5.2,<6"]
 
 [tool.tox.env.py312-dj60]
-deps = ["Django>=6,<6.2"]
+base_python = "python3.12"
+deps = ["pytest-django", "Django>=6,<6.2"]
 
 [tool.tox.env.py313-dj60]
-deps = ["Django>=6,<6.2"]
+base_python = "python3.13"
+deps = ["pytest-django", "Django>=6,<6.2"]
 
 [tool.tox.env.py314-dj60]
-deps = ["Django>=6,<6.2"]
+base_python = "python3.14"
+deps = ["pytest-django", "Django>=6,<6.2"]
 
 [tool.pytest.ini_options]
 # https://pytest-django.readthedocs.io/en/latest/configuring_django.html#pyproject-toml-settings
