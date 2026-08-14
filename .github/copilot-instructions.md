@@ -25,12 +25,14 @@
 
 ## Testing Rules
 
+- Activate the local virtualenv before running Python commands or tools.
 - Add/update tests for behavior changes.
 - Prefer integration-style checks with Django TestCase + test client for middleware/views.
 - Validate externally visible outcomes: response code/content, auth state, DB state.
 
 ## Tooling Rules
 
+- Activate the local virtualenv before running Python commands or tools.
 - Lint baseline: Ruff line length 140; ignores E265, E501, E722.
 - Standard verification commands:
   - pytest -sv
