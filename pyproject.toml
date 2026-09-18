@@ -41,8 +41,8 @@ GitHub = "https://github.com/dbca-wa/dbca-utils"
 dev = [
   "pytest-django>=4.14.0",
   "pytest-sugar>=1.1.1",
-  "tox>=4.53.0",
-  "tox-uv>=1.35.0",
+  "tox>=4.61.0",
+  "tox-uv>=1.36.0",
 ]
 
 [build-system]
@@ -53,7 +53,7 @@ build-backend = "uv_build"
 package = true
 
 [tool.tox]
-requires = ["tox>=4", "tox-uv>=1.35.0"]
+requires = ["tox>=4", "tox-uv>=1.36.0"]
 env_list = [
   "py312-dj52",
   "py313-dj52",
