@@ -40,8 +40,8 @@ GitHub = "https://github.com/dbca-wa/dbca-utils"
 [dependency-groups]
 dev = [
   "pytest-django>=4.14.0",
-  "pytest-sugar>=1.1.1",
-  "tox>=4.61.0",
+  "pytest-sugar>=1.1.0",
+  "tox>=4.64.0",
   "tox-uv>=1.36.0",
 ]
 
