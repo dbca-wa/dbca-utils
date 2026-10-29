@@ -1,6 +1,5 @@
 from django import http
-from django.conf import settings
-from django.contrib.auth import get_user_model, login, logout,models
+from django.contrib.auth import get_user_model, login, logout, models
 from django.utils import timezone
 from django.utils.deprecation import MiddlewareMixin
 from django.utils.html import strip_tags
@@ -14,13 +13,13 @@ User = get_user_model()
 
 # Optional setting: projects may define logout urls either as
 # a list of strings, or a single string.
-LOGOUT_URLS = env("LOGOUT_URLS",default=["/logout","/admin/logout","/ledger/logout"])
+LOGOUT_URLS = env("LOGOUT_URLS", default=["/logout", "/admin/logout", "/ledger/logout"])
 
 # Optional setting: projects may define accepted user email domains either as
 # a list of strings, or a single string.
-ALLOWED_EMAIL_SUFFIXES = env("ALLOWED_EMAIL_SUFFIX",default=[])
+ALLOWED_EMAIL_SUFFIXES = env("ALLOWED_EMAIL_SUFFIXES", default=[])
 if ALLOWED_EMAIL_SUFFIXES:
-    if any(not isinstance(suffix,str) for suffix in ALLOWED_EMAIL_SUFFIXES):
+    if any(not isinstance(suffix, str) for suffix in ALLOWED_EMAIL_SUFFIXES):
         raise ValueError("ALLOWED_EMAIL_SUFFIXES must be a list of strings")
 
     if len(ALLOWED_EMAIL_SUFFIXES) == 1:
@@ -38,6 +37,7 @@ attributemap = {
     "first_name": "HTTP_X_FIRST_NAME",
 }
 guest = models.AnonymousUser()
+
 
 def sync_usergroups(user, groups=None):
     from django.contrib.auth.models import Group
@@ -92,10 +92,7 @@ class SSOLoginMiddleware(MiddlewareMixin):
 
     def process_request(self, request):
         # Logout headers included with request.
-        if (
-            any(request.path.startswith(url) for url in LOGOUT_URLS)
-            and request.META.get("HTTP_X_LOGOUT_URL")
-        ):
+        if any(request.path.startswith(url) for url in LOGOUT_URLS) and request.META.get("HTTP_X_LOGOUT_URL"):
             logout(request)
             return http.HttpResponseRedirect(request.META["HTTP_X_LOGOUT_URL"])
 
@@ -111,13 +108,13 @@ class SSOLoginMiddleware(MiddlewareMixin):
         if request.user.is_authenticated and request.user.email != request.META.get("HTTP_X_EMAIL", ""):
             logout(request)
 
-        #check whether request is authenticated by auth2
+        # check whether request is authenticated by auth2
         if not request.META.get("HTTP_X_EMAIL", ""):
-            #request is not authenticated by auth2, attach the guest to request object
+            # request is not authenticated by auth2, attach the guest to request object
             request.user = guest
             return
 
-        #Request is authenticated by auth2
+        # Request is authenticated by auth2
         # Request user is not authenticated locally: obtain user attributes from the request.META dict
         # returned by SSO.
         if not request.user.is_authenticated:
@@ -140,14 +137,14 @@ class SSOLoginMiddleware(MiddlewareMixin):
                 return http.HttpResponseForbidden()
 
             # Check for an existing User instance.
-            #try to find the user with email address
+            # try to find the user with email address
             user = User.objects.filter(email__iexact=attributes["email"]).first()
 
-            #if not found, try to find the user with username
+            # if not found, try to find the user with username
             if not user and User.__name__ != "EmailUser":
                 user = User.objects.filter(username__iexact=attributes["username"]).first()
 
-            #if still not found, create an empty user instance
+            # if still not found, create an empty user instance
             if not user:
                 user = User(last_login=timezone.localtime())
 
