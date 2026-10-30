@@ -70,6 +70,33 @@ class UtilsTest(TestCase):
         test_str = env("TEST_FLOAT", value_type=str)
         self.assertTrue(isinstance(test_str, str))
 
+    def test_env_empty_int_returns_default(self):
+        """An empty numeric env var falls back to the default (regression: ValueError)."""
+        with patch.dict(os.environ, {"TEST_EMPTY_INT": ""}):
+            self.assertEqual(env("TEST_EMPTY_INT", default=0), 0)
+
+    def test_env_empty_float_returns_default(self):
+        with patch.dict(os.environ, {"TEST_EMPTY_FLOAT": ""}):
+            self.assertEqual(env("TEST_EMPTY_FLOAT", default=1.5), 1.5)
+
+    def test_env_whitespace_int_returns_default(self):
+        with patch.dict(os.environ, {"TEST_EMPTY_INT": "   "}):
+            self.assertEqual(env("TEST_EMPTY_INT", default=7), 7)
+
+    def test_env_empty_int_without_default_returns_none(self):
+        with patch.dict(os.environ, {"TEST_EMPTY_INT": ""}):
+            self.assertIsNone(env("TEST_EMPTY_INT", value_type=int))
+
+    def test_env_empty_required_int_raises(self):
+        with patch.dict(os.environ, {"TEST_EMPTY_INT": ""}):
+            with pytest.raises(Exception):
+                env("TEST_EMPTY_INT", value_type=int, required=True)
+
+    def test_env_empty_str_still_returns_empty_string(self):
+        """Empty strings remain valid str values (no change to existing behaviour)."""
+        with patch.dict(os.environ, {"TEST_EMPTY_STR": ""}):
+            self.assertEqual(env("TEST_EMPTY_STR", value_type=str), "")
+
 
 class ModelTest(TestCase):
     client = Client()
