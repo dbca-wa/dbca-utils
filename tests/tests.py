@@ -1,4 +1,5 @@
 import importlib
+import json
 import os
 import random
 import string
@@ -6,11 +7,13 @@ from unittest.mock import patch
 
 import pytest
 from django.contrib.auth.models import Group, User
-from django.test import TestCase
+from django.core.cache import cache
+from django.test import RequestFactory, TestCase
 from django.test.client import Client
 from django.urls import reverse
 
-from dbca_utils.healthcheck.healthcheck import populate_summary_data
+from dbca_utils.healthcheck import healthcheck as healthcheck_module
+from dbca_utils.healthcheck.healthcheck import _find_oldest_workload, item_version, populate_summary_data
 from dbca_utils.utils import env
 
 from .models import TestModel
@@ -473,3 +476,82 @@ class HealthcheckSummaryTest(TestCase):
             datas["summary"]["latest_workload"],
             {"hostname": "pod-a", "start_time": "2026-01-02T00:00:00"},
         )
+
+
+class HealthcheckWorkloadSelectionTest(TestCase):
+    """Test selection of the assigned workload a spare server should replace."""
+
+    def test_skips_assigned_server_without_health_data(self):
+        """An unreachable assigned server must not raise KeyError (regression)."""
+        datas = {"server-a": (200, _healthcheck_payload("2026-01-02T00:00:00", 1, 1, 1))}
+        assigned = {
+            item_version: 1,
+            "workload0": "server-a",
+            "workload1": "server-gone",
+        }
+        oldworkload = _find_oldest_workload(assigned, datas)
+        self.assertEqual(oldworkload[0], "workload0")
+        self.assertEqual(oldworkload[1], "server-a")
+
+    def test_returns_none_when_no_assigned_server_has_data(self):
+        assigned = {item_version: 1, "workload0": "server-gone"}
+        self.assertIsNone(_find_oldest_workload(assigned, {}))
+
+    def test_prefers_unhealthy_workload(self):
+        datas = {
+            "server-a": (200, _healthcheck_payload("2026-01-02T00:00:00", 1, 1, 1)),
+            "server-b": (503, "unavailable"),
+        }
+        assigned = {
+            item_version: 1,
+            "workload0": "server-a",
+            "workload1": "server-b",
+            "workload2": "server-gone",
+        }
+        oldworkload = _find_oldest_workload(assigned, datas)
+        self.assertEqual(oldworkload[0], "workload1")
+        self.assertEqual(oldworkload[1], "server-b")
+
+    def test_prefers_oldest_workload_when_all_healthy(self):
+        datas = {
+            "server-a": (200, _healthcheck_payload("2026-01-02T00:00:00", 1, 1, 1)),
+            "server-b": (200, _healthcheck_payload("2026-01-01T00:00:00", 1, 1, 1)),
+        }
+        assigned = {item_version: 1, "workload0": "server-a", "workload1": "server-b"}
+        oldworkload = _find_oldest_workload(assigned, datas)
+        self.assertEqual(oldworkload[0], "workload1")
+        self.assertEqual(oldworkload[1], "server-b")
+
+
+class HealthcheckDeploymentViewTest(TestCase):
+    """End-to-end checks for the fixed-workload deployment healthdata view."""
+
+    def setUp(self):
+        env_vars = {"WORKLOADS": "2", "WORKLOAD_DEPLOYMENT": "true", "HEALTHCHECK_ENABLED": "true"}
+        with patch.dict(os.environ, env_vars):
+            self.hc = importlib.reload(healthcheck_module)
+        self.hc.cache = cache
+        cache.clear()
+
+    def tearDown(self):
+        cache.clear()
+        # Restore the module's default (dynamic workloads) configuration.
+        importlib.reload(healthcheck_module)
+
+    def test_unreachable_assigned_server_is_reported_as_offline(self):
+        assigned = {
+            self.hc.item_version: 1,
+            "workload0": "server-a",
+            "workload1": "server-gone",
+        }
+        cache.set(self.hc.key_assignedworkloads, assigned, timeout=None)
+        workloads = {"server-a": ["10.0.0.1", 8080, 0]}
+        servers_res = {"server-a": (200, _healthcheck_payload("2026-01-01T00:00:00", 1, 1, 1))}
+        request = RequestFactory().get("/healthcheck/healthdata")
+        with patch.object(self.hc, "harvest_healthdata", return_value=(workloads, servers_res)):
+            response = self.hc.healthdata_view(request)
+        self.assertEqual(response.status_code, 200)
+        result = json.loads(response.content)
+        self.assertEqual(result["workload0"]["resources"]["cpu_total"], 1)
+        self.assertIn("server-gone", result["workload1"])
+        self.assertIn("offline host", result["workload1"])

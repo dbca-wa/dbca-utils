@@ -791,6 +791,49 @@ def harvest_healthdata(request):
 
 
 OFFLINE_STATUSCODE_LIST = (502, 503, 504, 401, 403, -1)
+
+
+def _find_oldest_workload(assignedworkloads, datas):
+    """Find the assigned workload that a spare server should replace.
+
+    An unhealthy assigned workload is preferred; otherwise the workload with
+    the oldest ``start_time`` is returned. Assignments whose server has no
+    health data (e.g. it is unreachable) are skipped, because they are reported
+    as offline hosts by the final mapping and must not be treated as usable.
+
+    Args:
+        assignedworkloads (dict): Mapping of workload name to server name.
+        datas (dict): Mapping of server name to ``(status_code, health_data)``.
+
+    Returns:
+        list | None: ``[workloadname, servername, health_data]`` or ``None``.
+    """
+    oldworkload = None
+    for workloadname, servername in assignedworkloads.items():
+        if workloadname == item_version:
+            continue
+        if servername not in datas:
+            # No health data for the assigned server (unreachable).
+            continue
+        if datas[servername][0] != 200:
+            # the assigned workload is not in good status, replace it
+            if oldworkload:
+                oldworkload[0] = workloadname
+                oldworkload[1] = servername
+                oldworkload[2] = datas[servername]
+            else:
+                oldworkload = [workloadname, servername, datas[servername]]
+            break
+        elif not oldworkload or oldworkload[2][1]["resources"]["start_time"] > datas[servername][1]["resources"]["start_time"]:
+            if oldworkload:
+                oldworkload[0] = workloadname
+                oldworkload[1] = servername
+                oldworkload[2] = datas[servername]
+            else:
+                oldworkload = [workloadname, servername, datas[servername]]
+    return oldworkload
+
+
 if WORKLOADS > 0 and WORKLOAD_DEPLOYMENT:
     # has a fixed number of workloads and it is a deployment
     WORKLOADNAMES = [get_workloadname(index) for index in range(WORKLOADS)]
@@ -806,7 +849,6 @@ if WORKLOADS > 0 and WORKLOAD_DEPLOYMENT:
         assignedworkloads = cache.get(key_assignedworkloads) or {item_version: 1}
         logger.debug("Get assigned workloads:{}".format(assignedworkloads))
         datas = {}
-        index = 0
         reassign_workloads = 0
         for workloadname in WORKLOADNAMES:
             servername = assignedworkloads.get(workloadname)
@@ -888,26 +930,7 @@ if WORKLOADS > 0 and WORKLOAD_DEPLOYMENT:
                 if res[0] != 200:
                     continue
                 #Find the oldest workload to replace
-                oldworkload = None
-                for workloadname,servername in assignedworkloads.items():
-                    if workloadname == item_version:
-                        continue
-                    if datas[servername][0] != 200:
-                        #the assigned workload is not in good status, replace it 
-                        if oldworkload:
-                            oldworkload[0] = workloadname
-                            oldworkload[1] = servername
-                            oldworkload[2] = datas[servername]
-                        else:
-                            oldworkload = [workloadname,servername,datas[servername]]
-                        break
-                    elif not oldworkload or oldworkload[2][1]["resources"]["start_time"] > datas[servername][1]["resources"]["start_time"]:
-                        if oldworkload:
-                            oldworkload[0] = workloadname
-                            oldworkload[1] = servername
-                            oldworkload[2] = datas[servername]
-                        else:
-                            oldworkload = [workloadname,servername,datas[servername]]
+                oldworkload = _find_oldest_workload(assignedworkloads, datas)
 
                 if oldworkload:
                     if oldworkload[2][0] != 200 or res[1]["resources"]["start_time"] > oldworkload[2][1]["resources"]["start_time"]:
