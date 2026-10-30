@@ -71,6 +71,8 @@ MIDDLEWARE = [
 
 - `ALLOWED_EMAIL_SUFFIXES` - optional list of accepted email suffixes (e.g. `['@dbca.wa.gov.au', '@dpaw.wa.gov.au']`).
   Users whose email does not match are rejected with `403 Forbidden`. Unset/empty disables the check.
+- `GROUP_SEPARATOR` - optional separator used to split the `X-Groups` header into group names. Defaults to `,`.
+  Names are trimmed and empty entries are ignored; an empty value falls back to `,`.
 
 ## Audit model mixin
 

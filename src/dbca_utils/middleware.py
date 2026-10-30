@@ -14,6 +14,11 @@ logger = logging.getLogger(__name__)
 
 ENABLE_AUTH2_GROUPS = env("ENABLE_AUTH2_GROUPS", default=False)
 LOCAL_USERGROUPS = env("LOCAL_USERGROUPS", default=[])
+GROUP_SEPARATOR = env("GROUP_SEPARATOR", default=",")
+if not GROUP_SEPARATOR:
+    # str.split("") raises ValueError, which would break every SSO login.
+    logger.warning("GROUP_SEPARATOR is empty; falling back to ','.")
+    GROUP_SEPARATOR = ","
 User = get_user_model()
 
 # Optional setting: projects may define logout urls either as
@@ -80,7 +85,7 @@ def sync_usergroups(user, groups=None):
     from django.contrib.auth.models import Group
 
     if groups:
-        usergroups = [Group.objects.get_or_create(name=name.strip())[0] for name in groups.split(",") if name.strip()]
+        usergroups = [Group.objects.get_or_create(name=name.strip())[0] for name in groups.split(GROUP_SEPARATOR) if name.strip()]
     else:
         usergroups = []
 

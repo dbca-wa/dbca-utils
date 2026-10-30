@@ -356,6 +356,79 @@ class SSOLoginMiddlewareGroupTest(TestCase):
         self.assertEqual(group_names, ["local_group", "sso_group"])
 
 
+class GroupSeparatorTest(TestCase):
+    """Test the GROUP_SEPARATOR configuration of SSOLoginMiddleware."""
+
+    client = Client()
+
+    def setUp(self):
+        from dbca_utils import middleware
+
+        self.middleware = middleware
+        self.user = User.objects.create_user(username="groupuser", email="groupuser@email.com")
+        self.addCleanup(self._reload, None)
+
+    def _reload(self, separator):
+        if separator is None:
+            os.environ.pop("GROUP_SEPARATOR", None)
+        else:
+            os.environ["GROUP_SEPARATOR"] = separator
+        importlib.reload(self.middleware)
+
+    def test_default_separator_is_comma(self):
+        self._reload(None)
+        self.assertEqual(self.middleware.GROUP_SEPARATOR, ",")
+
+    def test_env_separator_is_applied(self):
+        self._reload(";")
+        self.assertEqual(self.middleware.GROUP_SEPARATOR, ";")
+
+    def test_empty_separator_falls_back_to_comma(self):
+        """An empty separator would make str.split() raise, so fall back to ','."""
+        self._reload("")
+        self.assertEqual(self.middleware.GROUP_SEPARATOR, ",")
+        self.middleware.sync_usergroups(self.user, "group1,group2")
+        self.assertEqual(
+            sorted(self.user.groups.values_list("name", flat=True)),
+            ["group1", "group2"],
+        )
+
+    def test_custom_separator_splits_and_trims(self):
+        self._reload(";")
+        self.middleware.sync_usergroups(self.user, " group1 ;; group2 ")
+        self.assertEqual(
+            sorted(self.user.groups.values_list("name", flat=True)),
+            ["group1", "group2"],
+        )
+
+    def test_comma_is_not_a_separator_when_overridden(self):
+        self._reload(";")
+        self.middleware.sync_usergroups(self.user, "team,alpha;team,beta")
+        self.assertEqual(
+            sorted(self.user.groups.values_list("name", flat=True)),
+            ["team,alpha", "team,beta"],
+        )
+
+    @patch("dbca_utils.middleware.ENABLE_AUTH2_GROUPS", True)
+    @patch("dbca_utils.middleware.GROUP_SEPARATOR", ";")
+    def test_sso_login_uses_custom_separator(self):
+        """The middleware splits the X-Groups header using GROUP_SEPARATOR."""
+        url = reverse("test_model_list")
+        response = self.client.get(
+            url,
+            HTTP_REMOTE_USER="groupuser",
+            HTTP_X_EMAIL="groupuser@email.com",
+            HTTP_X_GROUPS="alpha; beta",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Authenticated: True")
+        self.user.refresh_from_db()
+        self.assertEqual(
+            sorted(self.user.groups.values_list("name", flat=True)),
+            ["alpha", "beta"],
+        )
+
+
 class AllowedEmailSuffixTest(TestCase):
     """Test the ALLOWED_EMAIL_SUFFIXES configuration of SSOLoginMiddleware."""
 
