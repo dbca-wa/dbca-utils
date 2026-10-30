@@ -870,14 +870,11 @@ if WORKLOADS > 0 and WORKLOAD_DEPLOYMENT:
             del servers_res[servername]
 
         assignedworkloads_changed = False
-        if len(WORKLOADNAMES) != len(assignedworkloads):
-            # remove the unexisted workloads from assignedworkloads.
-            for key in [k for k in assignedworkloads.keys()]:
-                if key == item_version:
-                    continue
-                if key not in WORKLOADNAMES:
-                    assignedworkloads_changed = True
-                    del assignedworkloads[key]
+        # remove the workloads that no longer exist from assignedworkloads;
+        # item_version is not a workload and is always kept.
+        for key in [k for k in assignedworkloads if k != item_version and k not in WORKLOADNAMES]:
+            assignedworkloads_changed = True
+            del assignedworkloads[key]
 
         if reassign_workloads > 0:
             # Some workloads are not assigned a workload or are not available 
