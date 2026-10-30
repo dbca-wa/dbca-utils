@@ -517,6 +517,8 @@ def save_workloads(workloads, unreached_servers=None):
     """
     # save the workloads
     logger.debug("Begin to save the changed workloads data({}) to cache.".format(str_workloads(workloads)))
+    # Tolerate cache payloads written by older versions without a version key.
+    workloads.setdefault(item_version, 0)
     max_retries = 1000
     for _ in range(max_retries):
         if cache.add(key_workloads_lock, 1, timeout=1):
@@ -564,6 +566,8 @@ def save_assignedworkloads(assignedworkloads):
     """
     # save the workloads
     logger.debug("Begin to save the changed assigned workloads data({}) to cache.".format(assignedworkloads))
+    # Tolerate cache payloads written by older versions without a version key.
+    assignedworkloads.setdefault(item_version, 0)
     max_retries = 1000
     for _ in range(max_retries):
         if cache.add(key_assignedworkloads_lock, 1, timeout=1):
@@ -884,6 +888,7 @@ if WORKLOADS > 0 and WORKLOAD_DEPLOYMENT:
             step = 0
             while reassign_workloads > 0:
                 step += 1
+                progressed = False
                 for workloadname in WORKLOADNAMES:
                     servername = assignedworkloads.get(workloadname)
                     if servername in datas and datas[servername][0] not in OFFLINE_STATUSCODE_LIST:
@@ -911,6 +916,7 @@ if WORKLOADS > 0 and WORKLOAD_DEPLOYMENT:
                         del servers_res[replacedservername]
                         assignedworkloads[workloadname] = replacedservername
                         assignedworkloads_changed = True
+                        progressed = True
 
                     if servers_res:
                         reassign_workloads -= 1
@@ -918,6 +924,18 @@ if WORKLOADS > 0 and WORKLOAD_DEPLOYMENT:
                         reassign_workloads = 0
                     if reassign_workloads == 0:
                         break
+
+                if step > 1 and not progressed and reassign_workloads > 0:
+                    # Nothing could be replaced in this pass (e.g. duplicate
+                    # assignments or only offline spare servers). From step 2
+                    # onwards each pass behaves identically, so the state cannot
+                    # change; stop instead of spinning forever.
+                    logger.debug(
+                        "Unable to reassign workloads (remaining: {}). assigned workloads: {}".format(
+                            reassign_workloads, assignedworkloads
+                        )
+                    )
+                    break
 
         if any(data[0] == 200 for data in servers_res.values()):
             #still have some running workloads
