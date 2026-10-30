@@ -14,11 +14,11 @@ logger = logging.getLogger(__name__)
 
 ENABLE_AUTH2_GROUPS = env("ENABLE_AUTH2_GROUPS", default=False)
 LOCAL_USERGROUPS = env("LOCAL_USERGROUPS", default=[])
-GROUP_SEPARATOR = env("GROUP_SEPARATOR", default=",")
+GROUP_SEPARATOR = env("GROUP_SEPARATOR", default=";")
 if not GROUP_SEPARATOR:
     # str.split("") raises ValueError, which would break every SSO login.
-    logger.warning("GROUP_SEPARATOR is empty; falling back to ','.")
-    GROUP_SEPARATOR = ","
+    logger.warning("GROUP_SEPARATOR is empty; falling back to ';'.")
+    GROUP_SEPARATOR = ";"
 User = get_user_model()
 
 # Optional setting: projects may define logout urls either as

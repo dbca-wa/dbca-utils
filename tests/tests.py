@@ -318,7 +318,7 @@ class SSOLoginMiddlewareGroupTest(TestCase):
             url,
             HTTP_REMOTE_USER="testuser",
             HTTP_X_EMAIL="testuser@email.com",
-            HTTP_X_GROUPS="group1,group2",
+            HTTP_X_GROUPS="group1;group2",
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Authenticated: True")
@@ -327,7 +327,7 @@ class SSOLoginMiddlewareGroupTest(TestCase):
             sorted(self.user.groups.values_list("name", flat=True)),
             ["group1", "group2"],
         )
-        self.assertEqual(self.client.session.get("usergroups"), "group1,group2")
+        self.assertEqual(self.client.session.get("usergroups"), "group1;group2")
 
     @patch("dbca_utils.middleware.ENABLE_AUTH2_GROUPS", True)
     def test_group_sync_updates_on_header_change(self):
@@ -337,7 +337,7 @@ class SSOLoginMiddlewareGroupTest(TestCase):
             url,
             HTTP_REMOTE_USER="testuser",
             HTTP_X_EMAIL="testuser@email.com",
-            HTTP_X_GROUPS="group1,group2",
+            HTTP_X_GROUPS="group1;group2",
         )
         self.user.refresh_from_db()
         self.assertEqual(
@@ -349,7 +349,7 @@ class SSOLoginMiddlewareGroupTest(TestCase):
             url,
             HTTP_REMOTE_USER="testuser",
             HTTP_X_EMAIL="testuser@email.com",
-            HTTP_X_GROUPS="group2,group3",
+            HTTP_X_GROUPS="group2;group3",
         )
         self.user.refresh_from_db()
         self.assertEqual(
@@ -365,7 +365,7 @@ class SSOLoginMiddlewareGroupTest(TestCase):
             url,
             HTTP_REMOTE_USER="testuser",
             HTTP_X_EMAIL="testuser@email.com",
-            HTTP_X_GROUPS=" group1 , group2 , ",
+            HTTP_X_GROUPS=" group1 ; group2 ; ",
         )
         self.assertEqual(response.status_code, 200)
         self.user.refresh_from_db()
@@ -413,42 +413,52 @@ class GroupSeparatorTest(TestCase):
             os.environ["GROUP_SEPARATOR"] = separator
         importlib.reload(self.middleware)
 
-    def test_default_separator_is_comma(self):
+    def test_default_separator_is_semicolon(self):
         self._reload(None)
-        self.assertEqual(self.middleware.GROUP_SEPARATOR, ",")
-
-    def test_env_separator_is_applied(self):
-        self._reload(";")
         self.assertEqual(self.middleware.GROUP_SEPARATOR, ";")
 
-    def test_empty_separator_falls_back_to_comma(self):
-        """An empty separator would make str.split() raise, so fall back to ','."""
+    def test_env_separator_is_applied(self):
+        self._reload("|")
+        self.assertEqual(self.middleware.GROUP_SEPARATOR, "|")
+
+    def test_empty_separator_falls_back_to_default(self):
+        """An empty separator would make str.split() raise, so fall back to ';'."""
         self._reload("")
-        self.assertEqual(self.middleware.GROUP_SEPARATOR, ",")
-        self.middleware.sync_usergroups(self.user, "group1,group2")
+        self.assertEqual(self.middleware.GROUP_SEPARATOR, ";")
+        self.middleware.sync_usergroups(self.user, "group1;group2")
         self.assertEqual(
             sorted(self.user.groups.values_list("name", flat=True)),
             ["group1", "group2"],
         )
 
-    def test_custom_separator_splits_and_trims(self):
-        self._reload(";")
+    def test_default_separator_splits_and_trims(self):
+        """By default the X-Groups header is split on ';'."""
+        self._reload(None)
         self.middleware.sync_usergroups(self.user, " group1 ;; group2 ")
         self.assertEqual(
             sorted(self.user.groups.values_list("name", flat=True)),
             ["group1", "group2"],
         )
 
-    def test_comma_is_not_a_separator_when_overridden(self):
-        self._reload(";")
+    def test_comma_is_literal_with_default_separator(self):
+        """Commas inside group names are preserved when splitting on ';'."""
+        self._reload(None)
         self.middleware.sync_usergroups(self.user, "team,alpha;team,beta")
         self.assertEqual(
             sorted(self.user.groups.values_list("name", flat=True)),
             ["team,alpha", "team,beta"],
         )
 
+    def test_custom_separator_splits_and_trims(self):
+        self._reload("|")
+        self.middleware.sync_usergroups(self.user, " group1 || group2 ")
+        self.assertEqual(
+            sorted(self.user.groups.values_list("name", flat=True)),
+            ["group1", "group2"],
+        )
+
     @patch("dbca_utils.middleware.ENABLE_AUTH2_GROUPS", True)
-    @patch("dbca_utils.middleware.GROUP_SEPARATOR", ";")
+    @patch("dbca_utils.middleware.GROUP_SEPARATOR", "|")
     def test_sso_login_uses_custom_separator(self):
         """The middleware splits the X-Groups header using GROUP_SEPARATOR."""
         url = reverse("test_model_list")
@@ -456,7 +466,7 @@ class GroupSeparatorTest(TestCase):
             url,
             HTTP_REMOTE_USER="groupuser",
             HTTP_X_EMAIL="groupuser@email.com",
-            HTTP_X_GROUPS="alpha; beta",
+            HTTP_X_GROUPS="alpha| beta",
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Authenticated: True")
