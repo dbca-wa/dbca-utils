@@ -25,6 +25,17 @@ User = get_user_model()
 # a list of strings, or a single string.
 LOGOUT_URLS = env("LOGOUT_URLS", default=["/logout", "/admin/logout", "/ledger/logout", "/sso/auth_logout"])
 
+
+def is_logout_url(path):
+    """Return True if ``path`` is one of the configured logout paths.
+
+    Paths are compared exactly (ignoring a trailing slash). A prefix match
+    would also match unrelated routes such as ``/logout-confirm`` or
+    ``/logoutx``, logging the user out of pages that are not logout endpoints.
+    """
+    normalised_path = (path or "").rstrip("/")
+    return any(normalised_path == url.rstrip("/") for url in LOGOUT_URLS if isinstance(url, str))
+
 # After logout the middleware redirects to the URL supplied by the SSO proxy.
 # Only relative URLs and HTTPS URLs within this domain (or its subdomains) are
 # permitted, to prevent the header being used as an open redirect.
@@ -134,7 +145,7 @@ class SSOLoginMiddleware(MiddlewareMixin):
 
     def process_request(self, request):
         # Logout headers included with request.
-        if any(request.path.startswith(url) for url in LOGOUT_URLS) and request.META.get("HTTP_X_LOGOUT_URL"):
+        if is_logout_url(request.path) and request.META.get("HTTP_X_LOGOUT_URL"):
             logout(request)
             logout_url = request.META["HTTP_X_LOGOUT_URL"]
             if is_allowed_logout_url(logout_url):

@@ -15,6 +15,7 @@ from django.urls import reverse
 
 from dbca_utils.healthcheck import healthcheck as healthcheck_module
 from dbca_utils.healthcheck.healthcheck import _find_oldest_workload, item_version, populate_summary_data
+from dbca_utils.middleware import is_logout_url
 from dbca_utils.utils import env
 
 from .models import TestModel
@@ -551,6 +552,76 @@ class SSOLoginMiddlewareLogoutTest(TestCase):
         """A disallowed redirect does not prevent the logout."""
         self._logout_request("https://evil.example/phish")
         self.assertNotIn("_auth_user_id", self.client.session)
+
+    def test_paths_sharing_a_logout_prefix_do_not_log_out(self):
+        """Only exact logout paths trigger the logout flow."""
+        for path in ("/logout-confirm", "/logoutx", "/admin/logoutfoo", "/logout/success", "/ledger/logout-something"):
+            with self.subTest(path=path):
+                self.client.force_login(self.user)
+                response = self.client.get(
+                    path,
+                    HTTP_REMOTE_USER="testuser",
+                    HTTP_X_EMAIL="testuser@dbca.wa.gov.au",
+                    HTTP_X_LOGOUT_URL="https://app.dbca.wa.gov.au/sso/logout",
+                )
+                self.assertEqual(response.status_code, 404)
+                self.assertIn("_auth_user_id", self.client.session)
+
+    def test_logout_path_with_trailing_slash_logs_out(self):
+        """A trailing slash on a configured logout path still matches."""
+        response = self.client.get(
+            "/logout/",
+            HTTP_REMOTE_USER="testuser",
+            HTTP_X_EMAIL="testuser@dbca.wa.gov.au",
+            HTTP_X_LOGOUT_URL="https://app.dbca.wa.gov.au/sso/logout",
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "https://app.dbca.wa.gov.au/sso/logout")
+        self.assertNotIn("_auth_user_id", self.client.session)
+
+
+class LogoutUrlConfigTest(TestCase):
+    """Test LOGOUT_URLS matching and configuration parsing."""
+
+    @patch("dbca_utils.middleware.LOGOUT_URLS", ["/logout", "/admin/logout"])
+    def test_matches_exact_paths(self):
+        for path in ("/logout", "/logout/", "/admin/logout", "/admin/logout/"):
+            with self.subTest(path=path):
+                self.assertTrue(is_logout_url(path))
+
+    @patch("dbca_utils.middleware.LOGOUT_URLS", ["/logout", "/admin/logout"])
+    def test_rejects_prefix_and_subpath_matches(self):
+        for path in (
+            "/logout-confirm",
+            "/logoutx",
+            "/admin/logoutfoo",
+            "/logout/success",
+            "/admin/logout/extra",
+            "/",
+            "",
+            None,
+        ):
+            with self.subTest(path=path):
+                self.assertFalse(is_logout_url(path))
+
+    def test_single_string_logout_urls_is_supported(self):
+        """LOGOUT_URLS may be configured as a single string, not just a list."""
+        from dbca_utils import middleware
+
+        self.addCleanup(self._reload, None)
+        self._reload("/signout")
+        self.assertEqual(middleware.LOGOUT_URLS, ["/signout"])
+        self.assertTrue(middleware.is_logout_url("/signout"))
+        self.assertFalse(middleware.is_logout_url("/signout-other"))
+
+    def _reload(self, value):
+        from dbca_utils import middleware
+
+        if value is None:
+            os.environ.pop("LOGOUT_URLS", None)
+        else:
+            os.environ["LOGOUT_URLS"] = value
+        importlib.reload(middleware)
 
 
 def _healthcheck_payload(start_time, cpu, pmemory, vmemory, processes=1, hostname=None):
