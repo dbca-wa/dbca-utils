@@ -80,7 +80,7 @@ def sync_usergroups(user, groups=None):
     from django.contrib.auth.models import Group
 
     if groups:
-        usergroups = [Group.objects.get_or_create(name=name)[0] for name in groups.split(",")]
+        usergroups = [Group.objects.get_or_create(name=name.strip())[0] for name in groups.split(",") if name.strip()]
     else:
         usergroups = []
 
