@@ -150,6 +150,46 @@ class ModelTest(TestCase):
         self.assertEqual(per_model, {obj._meta.label: 1})
         self.assertFalse(TestModel.objects.filter(pk=obj.pk).exists())
 
+    def test_changed_data_is_reset_after_save(self):
+        """changed_data must not keep reporting changes that have been saved."""
+        self.assertEqual(self.test_model.changed_data, [])
+        self.test_model.name = "Updated name"
+        self.assertEqual(self.test_model.changed_data, ["name"])
+        self.assertTrue(self.test_model.has_changed())
+        self.test_model.save()
+        self.assertEqual(self.test_model.changed_data, [])
+        self.assertFalse(self.test_model.has_changed())
+
+    def test_changed_data_tracks_changes_after_creation(self):
+        """A newly created object still detects later modifications."""
+        obj = TestModel.objects.create(name="Created")
+        self.assertEqual(obj.changed_data, [])
+        obj.name = "Renamed"
+        self.assertEqual(obj.changed_data, ["name"])
+
+    def test_changed_data_ignores_modified_and_modifier(self):
+        """modified and modifier are excluded from change tracking."""
+        self.test_model.modifier = self.user
+        self.test_model.save()
+        self.assertEqual(self.test_model.changed_data, [])
+        self.test_model.name = "Another name"
+        self.assertEqual(self.test_model.changed_data, ["name"])
+        # Clear the protected FK so tearDown can remove the user.
+        self.test_model.modifier = None
+        self.test_model.save()
+
+    def test_changed_data_is_reset_after_soft_delete(self):
+        """A soft delete records effective_to without leaving it marked as changed."""
+        self.test_model.delete()
+        self.assertTrue(self.test_model.is_deleted())
+        self.assertEqual(self.test_model.changed_data, [])
+
+    def test_changed_data_is_reset_after_refresh_from_db(self):
+        """Reloading from the database re-baselines change tracking."""
+        TestModel.objects.filter(pk=self.test_model.pk).update(name="Changed in db")
+        self.test_model.refresh_from_db()
+        self.assertEqual(self.test_model.changed_data, [])
+
     def test_url_request_returns_view(self):
         """Test the env() utility method works as expected."""
         url = reverse("test_model_list")
@@ -262,6 +302,24 @@ class SSOLoginMiddlewareGroupTest(TestCase):
             sorted(self.user.groups.values_list("name", flat=True)),
             ["group2", "group3"],
         )
+
+    @patch("dbca_utils.middleware.ENABLE_AUTH2_GROUPS", True)
+    def test_group_header_whitespace_is_trimmed(self):
+        """Group names from the header are stripped and empty entries ignored."""
+        url = reverse("test_model_list")
+        response = self.client.get(
+            url,
+            HTTP_REMOTE_USER="testuser",
+            HTTP_X_EMAIL="testuser@email.com",
+            HTTP_X_GROUPS=" group1 , group2 , ",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertEqual(
+            sorted(self.user.groups.values_list("name", flat=True)),
+            ["group1", "group2"],
+        )
+        self.assertFalse(Group.objects.filter(name__regex=r"^\s|\s$").exists())
 
     @patch("dbca_utils.middleware.LOCAL_USERGROUPS", ["local_group"])
     @patch("dbca_utils.middleware.ENABLE_AUTH2_GROUPS", True)
@@ -555,3 +613,25 @@ class HealthcheckDeploymentViewTest(TestCase):
         self.assertEqual(result["workload0"]["resources"]["cpu_total"], 1)
         self.assertIn("server-gone", result["workload1"])
         self.assertIn("offline host", result["workload1"])
+
+    def test_stale_workload_assignment_is_removed_and_saved(self):
+        """Assignments for workloads that no longer exist are dropped and persisted."""
+        assigned = {
+            self.hc.item_version: 1,
+            "workload0": "server-a",
+            "workload9": "server-b",
+        }
+        cache.set(self.hc.key_assignedworkloads, assigned, timeout=None)
+        workloads = {"server-a": ["10.0.0.1", 8080, 0], "server-b": ["10.0.0.2", 8080, 0]}
+        servers_res = {
+            "server-a": (200, _healthcheck_payload("2026-01-01T00:00:00", 1, 1, 1)),
+            "server-b": (200, _healthcheck_payload("2026-01-02T00:00:00", 2, 2, 2)),
+        }
+        request = RequestFactory().get("/healthcheck/healthdata")
+        with patch.object(self.hc, "harvest_healthdata", return_value=(workloads, servers_res)):
+            response = self.hc.healthdata_view(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("workload9", json.loads(response.content))
+        saved = cache.get(self.hc.key_assignedworkloads)
+        self.assertNotIn("workload9", saved)
+        self.assertEqual(saved["workload1"], "server-b")
