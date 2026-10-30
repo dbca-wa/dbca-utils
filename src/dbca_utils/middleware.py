@@ -146,7 +146,7 @@ class SSOLoginMiddleware(MiddlewareMixin):
         # Security check: if the logged-in request user's email does not match the email
         # returned from Auth2, invalidate the current request session and force a new session
         # using the returned SSO values.
-        if request.user.is_authenticated and request.user.email != request.META.get("HTTP_X_EMAIL", ""):
+        if request.user.is_authenticated and (request.user.email or "").lower() != request.META.get("HTTP_X_EMAIL", "").lower():
             logout(request)
 
         # check whether request is authenticated by auth2

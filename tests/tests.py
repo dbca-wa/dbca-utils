@@ -2,6 +2,7 @@ import importlib
 import json
 import os
 import random
+import signal
 import string
 from unittest.mock import patch
 
@@ -91,9 +92,8 @@ class UtilsTest(TestCase):
             self.assertIsNone(env("TEST_EMPTY_INT", value_type=int))
 
     def test_env_empty_required_int_raises(self):
-        with patch.dict(os.environ, {"TEST_EMPTY_INT": ""}):
-            with pytest.raises(Exception):
-                env("TEST_EMPTY_INT", value_type=int, required=True)
+        with patch.dict(os.environ, {"TEST_EMPTY_INT": ""}), pytest.raises(Exception):
+            env("TEST_EMPTY_INT", value_type=int, required=True)
 
     def test_env_empty_str_still_returns_empty_string(self):
         """Empty strings remain valid str values (no change to existing behaviour)."""
@@ -217,6 +217,22 @@ class SSOLoginMiddlewareTest(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Authenticated: True")
+
+    def test_email_case_difference_keeps_session(self):
+        """Case-only email differences must not force a logout/login cycle."""
+        user = User.objects.create_user(username="caseuser", email="Case.User@Email.com")
+        self.client.logout()
+        url = reverse("test_model_list")
+        self.client.get(url, HTTP_REMOTE_USER="caseuser", HTTP_X_EMAIL="case.user@email.com")
+        session_key = self.client.session.session_key
+        response = self.client.get(url, HTTP_REMOTE_USER="caseuser", HTTP_X_EMAIL="case.user@email.com")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Authenticated: True")
+        self.assertEqual(self.client.session.session_key, session_key)
+        # The SSO header email is authoritative, so the stored address follows
+        # the header casing; only the session must survive the case difference.
+        user.refresh_from_db()
+        self.assertEqual(user.email, "case.user@email.com")
 
     def test_user_properties_update(self):
         """Test that requests with relevant META headers will update user properties."""
@@ -346,7 +362,7 @@ class AllowedEmailSuffixTest(TestCase):
     client = Client()
 
     def setUp(self):
-        import dbca_utils.middleware as middleware
+        from dbca_utils import middleware
 
         self.middleware = middleware
         self.addCleanup(self._reload_without_suffixes)
@@ -585,7 +601,10 @@ class HealthcheckDeploymentViewTest(TestCase):
     """End-to-end checks for the fixed-workload deployment healthdata view."""
 
     def setUp(self):
-        env_vars = {"WORKLOADS": "2", "WORKLOAD_DEPLOYMENT": "true", "HEALTHCHECK_ENABLED": "true"}
+        self._reload_module()
+
+    def _reload_module(self, workloads=2):
+        env_vars = {"WORKLOADS": str(workloads), "WORKLOAD_DEPLOYMENT": "true", "HEALTHCHECK_ENABLED": "true"}
         with patch.dict(os.environ, env_vars):
             self.hc = importlib.reload(healthcheck_module)
         self.hc.cache = cache
@@ -635,3 +654,55 @@ class HealthcheckDeploymentViewTest(TestCase):
         saved = cache.get(self.hc.key_assignedworkloads)
         self.assertNotIn("workload9", saved)
         self.assertEqual(saved["workload1"], "server-b")
+
+    @pytest.mark.skipif(not hasattr(signal, "SIGALRM"), reason="SIGALRM is not available on this platform")
+    def test_duplicate_assignment_does_not_hang(self):
+        """Two workloads assigned to one server must not spin the failover loop."""
+        self._reload_module(workloads=3)
+        assigned = {
+            self.hc.item_version: 1,
+            "workload0": "server-a",
+            "workload1": "server-a",
+            "workload2": "server-gone",
+        }
+        cache.set(self.hc.key_assignedworkloads, assigned, timeout=None)
+        workloads = {name: ["10.0.0.1", 8080, 0] for name in ("server-a", "server-x", "server-y")}
+        servers_res = {
+            "server-a": (200, _healthcheck_payload("2026-01-02T00:00:00", 1, 1, 1)),
+            "server-x": (200, _healthcheck_payload("2026-01-01T00:00:00", 2, 2, 2)),
+            "server-y": (200, _healthcheck_payload("2026-01-03T00:00:00", 3, 3, 3)),
+        }
+        request = RequestFactory().get("/healthcheck/healthdata")
+
+        def timeout(signum, frame):
+            raise TimeoutError("healthdata_view did not terminate")
+
+        previous_handler = signal.signal(signal.SIGALRM, timeout)
+        signal.alarm(5)
+        try:
+            with patch.object(self.hc, "harvest_healthdata", return_value=(workloads, servers_res)):
+                response = self.hc.healthdata_view(request)
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, previous_handler)
+
+        self.assertEqual(response.status_code, 200)
+        result = json.loads(response.content)
+        self.assertEqual(result["workload0"]["resources"]["cpu_total"], 1)
+        self.assertEqual(result["workload1"]["resources"]["cpu_total"], 1)
+        self.assertEqual(result["workload2"]["resources"]["cpu_total"], 3)
+
+    def test_save_assignedworkloads_handles_missing_version(self):
+        """A cached mapping without __version__ must not raise KeyError."""
+        cache.set(self.hc.key_assignedworkloads, {"workload0": "server-a"}, timeout=None)
+        self.hc.save_assignedworkloads({"workload0": "server-b"})
+        saved = cache.get(self.hc.key_assignedworkloads)
+        self.assertEqual(saved["workload0"], "server-b")
+        self.assertEqual(saved[self.hc.item_version], 1)
+
+    def test_save_workloads_handles_missing_version(self):
+        """A cached workloads payload without __version__ must not raise KeyError."""
+        cache.set(self.hc.key_workloads, {"server-a": [["10.0.0.1", 8080], "secret", 0]}, timeout=None)
+        self.hc.save_workloads({"server-b": [["10.0.0.2", 8080], "secret2", 0]})
+        saved = cache.get(self.hc.key_workloads)
+        self.assertEqual(saved[self.hc.item_version], 1)
