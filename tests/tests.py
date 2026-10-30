@@ -10,6 +10,7 @@ from django.test import TestCase
 from django.test.client import Client
 from django.urls import reverse
 
+from dbca_utils.healthcheck.healthcheck import populate_summary_data
 from dbca_utils.utils import env
 
 from .models import TestModel
@@ -101,6 +102,23 @@ class ModelTest(TestCase):
         self.assertFalse(obj_del.pk in current_pks)
         self.assertTrue(obj_del.pk in del_pks)
         self.assertFalse(self.test_model.pk in del_pks)
+
+    def test_delete_with_force_false_soft_deletes(self):
+        """delete(force=False) must soft delete instead of raising TypeError."""
+        obj = TestModel.objects.create(name="Soft deleted object")
+        obj.delete(force=False)
+        self.assertIsNotNone(obj.effective_to)
+        self.assertTrue(TestModel.objects.filter(pk=obj.pk).exists())
+        self.assertFalse(TestModel.objects.current().filter(pk=obj.pk).exists())
+        self.assertTrue(TestModel.objects.deleted().filter(pk=obj.pk).exists())
+
+    def test_delete_with_force_true_hard_deletes(self):
+        """delete(force=True) removes the row and returns Django's delete result."""
+        obj = TestModel.objects.create(name="Hard deleted object")
+        deleted, per_model = obj.delete(force=True)
+        self.assertEqual(deleted, 1)
+        self.assertEqual(per_model, {obj._meta.label: 1})
+        self.assertFalse(TestModel.objects.filter(pk=obj.pk).exists())
 
     def test_url_request_returns_view(self):
         """Test the env() utility method works as expected."""
@@ -356,3 +374,75 @@ class SSOLoginMiddlewareLogoutTest(TestCase):
         """A disallowed redirect does not prevent the logout."""
         self._logout_request("https://evil.example/phish")
         self.assertNotIn("_auth_user_id", self.client.session)
+
+
+def _healthcheck_payload(start_time, cpu, pmemory, vmemory, processes=1, hostname=None):
+    """Build a minimal workload health payload for summary tests."""
+    payload = {
+        "resources": {
+            "start_time": start_time,
+            "processes": processes,
+            "cpu_total": cpu,
+            "cpu_min": cpu,
+            "cpu_max": cpu,
+            "pmemory_total": pmemory,
+            "pmemory_min": pmemory,
+            "pmemory_max": pmemory,
+            "vmemory_total": vmemory,
+            "vmemory_min": vmemory,
+            "vmemory_max": vmemory,
+        }
+    }
+    if hostname:
+        payload["hostname"] = hostname
+    return payload
+
+
+class HealthcheckSummaryTest(TestCase):
+    """Test populate_summary_data aggregation of workload health data."""
+
+    def test_summary_totals(self):
+        """Totals and min/max are aggregated across workloads (cpu counted once)."""
+        datas = {
+            "workload0": _healthcheck_payload("2026-01-01T00:00:00", 10, 100, 200, processes=2),
+            "workload1": _healthcheck_payload("2026-01-02T00:00:00", 20, 300, 400, processes=3),
+        }
+        populate_summary_data(datas)
+        summary = datas["summary"]
+        self.assertEqual(summary["cpu_total"], 30)
+        self.assertEqual(summary["cpu_min"], 10)
+        self.assertEqual(summary["cpu_max"], 20)
+        self.assertEqual(summary["pmemory_total"], 400)
+        self.assertEqual(summary["pmemory_min"], 100)
+        self.assertEqual(summary["pmemory_max"], 300)
+        self.assertEqual(summary["vmemory_total"], 600)
+        self.assertEqual(summary["processes_total"], 5)
+        self.assertEqual(summary["workloads_running"], 2)
+        self.assertEqual(summary["workloads_failed"], 0)
+
+    def test_summary_ignores_failed_workloads(self):
+        """Failed workloads are counted but excluded from the totals."""
+        datas = {
+            "workload0": _healthcheck_payload("2026-01-01T00:00:00", 10, 100, 200),
+            "workload1": "workload1: connection refused",
+        }
+        populate_summary_data(datas)
+        summary = datas["summary"]
+        self.assertEqual(summary["cpu_total"], 10)
+        self.assertEqual(summary["pmemory_total"], 100)
+        self.assertEqual(summary["vmemory_total"], 200)
+        self.assertEqual(summary["processes_total"], 1)
+        self.assertEqual(summary["workloads_running"], 1)
+        self.assertEqual(summary["workloads_failed"], 1)
+
+    def test_summary_latest_workload(self):
+        """The workload with the most recent start_time is reported."""
+        datas = {
+            "workload0": _healthcheck_payload("2026-01-02T00:00:00", 1, 1, 1, hostname="pod-a"),
+            "workload1": _healthcheck_payload("2026-01-01T00:00:00", 1, 1, 1, hostname="pod-b"),
+        }
+        populate_summary_data(datas)
+        self.assertEqual(
+            datas["summary"]["latest_workload"],
+            {"hostname": "pod-a", "start_time": "2026-01-02T00:00:00"},
+        )

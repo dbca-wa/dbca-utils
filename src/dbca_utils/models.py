@@ -34,15 +34,14 @@ class ActiveMixin(models.Model):
         return not self.is_active()
 
     def delete(self, *args, **kwargs):
-        """Overide the standard delete method; sets effective_to the current
-        date and time.
+        """Override the standard delete method; sets effective_to to the current
+        date and time, unless ``force=True`` is passed.
         """
-        if "force" in kwargs and kwargs["force"]:
-            kwargs.pop("force", None)
-            super().delete(*args, **kwargs)
-        else:
-            self.effective_to = timezone.now()
-            super().save(*args, **kwargs)
+        force = kwargs.pop("force", False)
+        if force:
+            return super().delete(*args, **kwargs)
+        self.effective_to = timezone.now()
+        super().save(*args, **kwargs)
 
 
 class AuditMixin(models.Model):
