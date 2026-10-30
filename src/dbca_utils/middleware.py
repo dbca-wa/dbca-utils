@@ -154,19 +154,25 @@ class SSOLoginMiddleware(MiddlewareMixin):
             return http.HttpResponseRedirect("/")
 
         # Auth2 is not enabled, skip further processing.
-        if "HTTP_REMOTE_USER" not in request.META or not request.META["HTTP_REMOTE_USER"]:
+        sso_username = request.META.get("HTTP_REMOTE_USER", "").strip()
+        if not sso_username:
             # auth2 not enabled
             return
 
-        # Auth2 is enabled.
+        # Auth2 is enabled. The identity headers are untrusted input, so normalise
+        # them once here and use these values throughout: surrounding whitespace
+        # would otherwise never compare equal to the stored values and force a
+        # logout/login cycle on every request.
+        sso_email = request.META.get("HTTP_X_EMAIL", "").strip()
+
         # Security check: if the logged-in request user's email does not match the email
         # returned from Auth2, invalidate the current request session and force a new session
-        # using the returned SSO values.
-        if request.user.is_authenticated and (request.user.email or "").lower() != request.META.get("HTTP_X_EMAIL", "").lower():
+        # using the returned SSO values. The comparison ignores case and surrounding whitespace.
+        if request.user.is_authenticated and (request.user.email or "").strip().lower() != sso_email.lower():
             logout(request)
 
         # check whether request is authenticated by auth2
-        if not request.META.get("HTTP_X_EMAIL", ""):
+        if not sso_email:
             # request is not authenticated by auth2, attach the guest to request object
             request.user = guest
             return
@@ -180,6 +186,10 @@ class SSOLoginMiddleware(MiddlewareMixin):
             for key, meta_value in attributemap.items():
                 if meta_value in request.META:
                     attributes[key] = request.META[meta_value]
+
+            # Use the normalised identity values rather than the raw headers.
+            attributes["username"] = sso_username
+            attributes["email"] = sso_email
 
             # Sanitise first_name and last_name values, because end-users have control over these
             # values and could conceivably inject malicious values into them (e.g. a XSS attack).

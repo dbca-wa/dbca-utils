@@ -7,6 +7,7 @@ import string
 from unittest.mock import patch
 
 import pytest
+from django.conf import settings
 from django.contrib.auth.models import Group, User
 from django.core.cache import cache
 from django.test import RequestFactory, TestCase
@@ -234,6 +235,42 @@ class SSOLoginMiddlewareTest(TestCase):
         # the header casing; only the session must survive the case difference.
         user.refresh_from_db()
         self.assertEqual(user.email, "case.user@email.com")
+
+    def test_email_whitespace_keeps_session(self):
+        """Whitespace around the SSO email must not force a logout/login cycle."""
+        self.client.force_login(self.user)
+        url = reverse("test_model_list")
+        self.client.get(url, HTTP_REMOTE_USER="testuser", HTTP_X_EMAIL="  testuser@email.com  ")
+        session_key = self.client.session.session_key
+        response = self.client.get(url, HTTP_REMOTE_USER="testuser", HTTP_X_EMAIL="  testuser@email.com  ")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Authenticated: True")
+        self.assertEqual(self.client.session.session_key, session_key)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, "testuser@email.com")
+
+    def test_padded_identity_headers_are_trimmed(self):
+        """Identity headers are trimmed before user lookup and storage."""
+        url = reverse("test_model_list")
+        response = self.client.get(url, HTTP_REMOTE_USER="  newuser  ", HTTP_X_EMAIL="  newuser@email.com  ")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Authenticated: True")
+        self.assertEqual(User.objects.filter(username="newuser", email="newuser@email.com").count(), 1)
+        self.assertFalse(User.objects.filter(username__regex=r"^\s|\s$").exists())
+        self.assertFalse(User.objects.filter(email__regex=r"^\s|\s$").exists())
+        # A second identical request reuses the same account.
+        self.client.get(url, HTTP_REMOTE_USER="  newuser  ", HTTP_X_EMAIL="  newuser@email.com  ")
+        self.assertEqual(User.objects.filter(email="newuser@email.com").count(), 1)
+
+    def test_whitespace_only_remote_user_is_ignored(self):
+        """A whitespace-only REMOTE_USER counts as 'auth2 not enabled'."""
+        url = reverse("test_model_list")
+        response = self.client.get(url, HTTP_REMOTE_USER="   ", HTTP_X_EMAIL="someone@email.com")
+        # The view requires login, so an ignored SSO header means a login redirect.
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(settings.LOGIN_URL, response["Location"])
+        self.assertNotIn("_auth_user_id", self.client.session)
+        self.assertFalse(User.objects.filter(email="someone@email.com").exists())
 
     def test_user_properties_update(self):
         """Test that requests with relevant META headers will update user properties."""
