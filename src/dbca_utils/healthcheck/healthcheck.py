@@ -650,7 +650,6 @@ def populate_summary_data(datas):
 
         summary["cpu_total"] += serverdata["resources"]["cpu_total"]
 
-        summary["cpu_total"] += serverdata["resources"]["cpu_total"]
         if summary["cpu_min"] is None or summary["cpu_min"] > serverdata["resources"]["cpu_total"]:
             summary["cpu_min"] = serverdata["resources"]["cpu_total"]
         if summary["cpu_max"] is None or summary["cpu_max"] < serverdata["resources"]["cpu_total"]:
