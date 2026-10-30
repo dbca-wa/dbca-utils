@@ -1,3 +1,4 @@
+import importlib
 import os
 import random
 import string
@@ -231,3 +232,127 @@ class SSOLoginMiddlewareGroupTest(TestCase):
         self.user.refresh_from_db()
         group_names = sorted(self.user.groups.values_list("name", flat=True))
         self.assertEqual(group_names, ["local_group", "sso_group"])
+
+
+class AllowedEmailSuffixTest(TestCase):
+    """Test the ALLOWED_EMAIL_SUFFIXES configuration of SSOLoginMiddleware."""
+
+    client = Client()
+
+    def setUp(self):
+        import dbca_utils.middleware as middleware
+
+        self.middleware = middleware
+        self.addCleanup(self._reload_without_suffixes)
+        self.client.logout()
+
+    def _reload_without_suffixes(self):
+        os.environ.pop("ALLOWED_EMAIL_SUFFIXES", None)
+        importlib.reload(self.middleware)
+
+    def _reload_with_suffixes(self, suffixes):
+        with patch.dict(os.environ, {"ALLOWED_EMAIL_SUFFIXES": repr(suffixes)}):
+            return importlib.reload(self.middleware)
+
+    def test_single_suffix(self):
+        """A single suffix restricts logins to that email domain."""
+        middleware = self._reload_with_suffixes(["@dbca.wa.gov.au"])
+        self.assertTrue(middleware.f_check_email_suffix("user@dbca.wa.gov.au"))
+        self.assertFalse(middleware.f_check_email_suffix("user@example.com"))
+
+    def test_multiple_suffixes(self):
+        """Multiple suffixes must be accepted (regression: NameError on import)."""
+        middleware = self._reload_with_suffixes(["@dbca.wa.gov.au", "@dpaw.wa.gov.au"])
+        self.assertTrue(middleware.f_check_email_suffix("user@dbca.wa.gov.au"))
+        self.assertTrue(middleware.f_check_email_suffix("user@dpaw.wa.gov.au"))
+        self.assertFalse(middleware.f_check_email_suffix("user@example.com"))
+
+    def test_no_suffixes_disables_check(self):
+        """An empty suffix list disables the email domain check."""
+        middleware = self._reload_with_suffixes([])
+        self.assertIsNone(middleware.f_check_email_suffix)
+
+    def test_multiple_suffixes_allows_login(self):
+        """A user with an allowed email suffix is logged in."""
+        self._reload_with_suffixes(["@dbca.wa.gov.au", "@dpaw.wa.gov.au"])
+        response = self.client.get(
+            reverse("test_model_list"),
+            HTTP_REMOTE_USER="testuser",
+            HTTP_X_EMAIL="testuser@dpaw.wa.gov.au",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Authenticated: True")
+
+    def test_multiple_suffixes_forbids_login(self):
+        """A user with a disallowed email suffix is rejected and not created."""
+        self._reload_with_suffixes(["@dbca.wa.gov.au", "@dpaw.wa.gov.au"])
+        response = self.client.get(
+            reverse("test_model_list"),
+            HTTP_REMOTE_USER="testuser",
+            HTTP_X_EMAIL="testuser@example.com",
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(User.objects.filter(username="testuser").exists())
+
+
+class SSOLoginMiddlewareLogoutTest(TestCase):
+    """Test the logout redirect handling of SSOLoginMiddleware."""
+
+    client = Client()
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="testuser", email="testuser@dbca.wa.gov.au")
+        self.client.force_login(self.user)
+
+    def _logout_request(self, logout_url):
+        return self.client.get(
+            "/logout",
+            HTTP_REMOTE_USER="testuser",
+            HTTP_X_EMAIL="testuser@dbca.wa.gov.au",
+            HTTP_X_LOGOUT_URL=logout_url,
+        )
+
+    def test_redirects_to_allowed_dbca_hosts(self):
+        """HTTPS URLs on dbca.wa.gov.au and its subdomains are allowed."""
+        for url in (
+            "https://app.dbca.wa.gov.au/sso/logout",
+            "https://dbca.wa.gov.au/logout",
+            "https://APP.DBCA.WA.GOV.AU/logout",
+            "https://app.dbca.wa.gov.au:8443/logout",
+        ):
+            with self.subTest(url=url):
+                response = self._logout_request(url)
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(response["Location"], url)
+
+    def test_redirects_to_relative_url(self):
+        """Relative logout URLs stay on the current host and are allowed."""
+        response = self._logout_request("/sso/logout")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/sso/logout")
+
+    def test_rejects_disallowed_urls(self):
+        """External, plain HTTP and lookalike hosts are not used for redirects."""
+        for url in (
+            "https://evil.example/phish",
+            "https://dbca.wa.gov.au.evil.example/",
+            "https://evil-dbca.wa.gov.au/",
+            "https://dbca.wa.gov.au@evil.example/",
+            "//evil.example/phish",
+            "http://app.dbca.wa.gov.au/logout",
+            "javascript:alert(1)",
+        ):
+            with self.subTest(url=url):
+                response = self._logout_request(url)
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(response["Location"], "/")
+
+    def test_logout_clears_session(self):
+        """The user is logged out regardless of the redirect target."""
+        self._logout_request("https://app.dbca.wa.gov.au/sso/logout")
+        self.assertNotIn("_auth_user_id", self.client.session)
+
+    def test_rejected_redirect_still_logs_out(self):
+        """A disallowed redirect does not prevent the logout."""
+        self._logout_request("https://evil.example/phish")
+        self.assertNotIn("_auth_user_id", self.client.session)

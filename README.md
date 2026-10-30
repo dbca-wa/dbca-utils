@@ -42,6 +42,8 @@ if required:
 
 This will automatically login and create users using headers from an upstream proxy (REMOTE_USER and some others).
 The logout view will redirect to a separate logout page which clears the SSO session.
+Logout redirects (`X-Logout-URL`) are only followed for relative URLs or HTTPS URLs under
+`dbca.wa.gov.au` (including subdomains); any other value is ignored and the user is redirected to `/`.
 
 ### Usage
 
@@ -64,6 +66,11 @@ MIDDLEWARE = [
     ...,
 ]
 ```
+
+### Configuration
+
+- `ALLOWED_EMAIL_SUFFIXES` - optional list of accepted email suffixes (e.g. `['@dbca.wa.gov.au', '@dpaw.wa.gov.au']`).
+  Users whose email does not match are rejected with `403 Forbidden`. Unset/empty disables the check.
 
 ## Audit model mixin
 

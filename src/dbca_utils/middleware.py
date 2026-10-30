@@ -1,3 +1,6 @@
+import logging
+from urllib.parse import urlparse
+
 from django import http
 from django.contrib.auth import get_user_model, login, logout, models
 from django.utils import timezone
@@ -7,13 +10,47 @@ from markupsafe import escape
 
 from dbca_utils.utils import env
 
+logger = logging.getLogger(__name__)
+
 ENABLE_AUTH2_GROUPS = env("ENABLE_AUTH2_GROUPS", default=False)
 LOCAL_USERGROUPS = env("LOCAL_USERGROUPS", default=[])
 User = get_user_model()
 
 # Optional setting: projects may define logout urls either as
 # a list of strings, or a single string.
-LOGOUT_URLS = env("LOGOUT_URLS", default=["/logout", "/admin/logout", "/ledger/logout"])
+LOGOUT_URLS = env("LOGOUT_URLS", default=["/logout", "/admin/logout", "/ledger/logout", "/sso/auth_logout"])
+
+# After logout the middleware redirects to the URL supplied by the SSO proxy.
+# Only relative URLs and HTTPS URLs within this domain (or its subdomains) are
+# permitted, to prevent the header being used as an open redirect.
+ALLOWED_LOGOUT_DOMAIN = "dbca.wa.gov.au"
+
+
+def is_allowed_logout_url(url):
+    """Return True if ``url`` is safe to redirect to after logout.
+
+    Relative URLs are allowed (they stay on the current host). Absolute URLs
+    must use HTTPS and point at ``ALLOWED_LOGOUT_DOMAIN`` or one of its
+    subdomains.
+    """
+    if not url:
+        return False
+
+    # Browsers treat backslashes as forward slashes, so normalise them before
+    # parsing to avoid bypasses such as "https://evil.example\\@dbca.wa.gov.au".
+    url = url.strip().replace("\\", "/")
+
+    # Allow same-site relative URLs, but not protocol-relative ones ("//host").
+    if url.startswith("/") and not url.startswith("//"):
+        return True
+
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        return False
+
+    host = (parsed.hostname or "").lower().rstrip(".")
+    return host == ALLOWED_LOGOUT_DOMAIN or host.endswith("." + ALLOWED_LOGOUT_DOMAIN)
+
 
 # Optional setting: projects may define accepted user email domains either as
 # a list of strings, or a single string.
@@ -26,7 +63,7 @@ if ALLOWED_EMAIL_SUFFIXES:
         ALLOWED_EMAIL_SUFFIXES = ALLOWED_EMAIL_SUFFIXES[0]
         f_check_email_suffix = lambda email: email.endswith(ALLOWED_EMAIL_SUFFIXES)
     else:
-        f_check_email_suffix = lambda email: any(email.endswith(suffix) for suffix in ALLOWED_EMAIL_SUFFIX)
+        f_check_email_suffix = lambda email: any(email.endswith(suffix) for suffix in ALLOWED_EMAIL_SUFFIXES)
 else:
     f_check_email_suffix = None
 
@@ -94,7 +131,11 @@ class SSOLoginMiddleware(MiddlewareMixin):
         # Logout headers included with request.
         if any(request.path.startswith(url) for url in LOGOUT_URLS) and request.META.get("HTTP_X_LOGOUT_URL"):
             logout(request)
-            return http.HttpResponseRedirect(request.META["HTTP_X_LOGOUT_URL"])
+            logout_url = request.META["HTTP_X_LOGOUT_URL"]
+            if is_allowed_logout_url(logout_url):
+                return http.HttpResponseRedirect(logout_url)
+            logger.warning("Ignoring disallowed logout redirect URL: %s", logout_url)
+            return http.HttpResponseRedirect("/")
 
         # Auth2 is not enabled, skip further processing.
         if "HTTP_REMOTE_USER" not in request.META or not request.META["HTTP_REMOTE_USER"]:
