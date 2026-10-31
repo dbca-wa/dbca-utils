@@ -34,15 +34,14 @@ class ActiveMixin(models.Model):
         return not self.is_active()
 
     def delete(self, *args, **kwargs):
-        """Overide the standard delete method; sets effective_to the current
-        date and time.
+        """Override the standard delete method; sets effective_to to the current
+        date and time, unless ``force=True`` is passed.
         """
-        if "force" in kwargs and kwargs["force"]:
-            kwargs.pop("force", None)
-            super().delete(*args, **kwargs)
-        else:
-            self.effective_to = timezone.now()
-            super().save(*args, **kwargs)
+        force = kwargs.pop("force", False)
+        if force:
+            return super().delete(*args, **kwargs)
+        self.effective_to = timezone.now()
+        super().save(*args, **kwargs)
 
 
 class AuditMixin(models.Model):
@@ -76,8 +75,23 @@ class AuditMixin(models.Model):
         super().__init__(*args, **kwargs)
         self._initial = {}
         if self.pk:
-            for field in self._meta.fields:
-                self._initial[field.attname] = getattr(self, field.attname)
+            self._reset_initial()
+
+    def _reset_initial(self):
+        """Snapshot the current field values as the baseline for change tracking."""
+        self._initial = {
+            field.attname: self.__dict__[field.attname] for field in self._meta.fields if field.attname in self.__dict__
+        }
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        # Refresh the snapshot, otherwise changed_data would keep reporting the
+        # changes that were just saved.
+        self._reset_initial()
+
+    def refresh_from_db(self, *args, **kwargs):
+        super().refresh_from_db(*args, **kwargs)
+        self._reset_initial()
 
     def has_changed(self):
         """Returns True if the current data object differs from saved."""

@@ -2,6 +2,13 @@ import os
 from ast import literal_eval
 
 
+def _default_for_missing(key, default, required):
+    """Return the default for an unset/empty variable, or raise if it is required."""
+    if default is not None or not required:
+        return default
+    raise Exception(f"Missing required environment variable {key}")
+
+
 def env(key, default=None, required=False, value_type=None):
     """
     Retrieves environment variables and returns Python natives. The (optional)
@@ -10,6 +17,7 @@ def env(key, default=None, required=False, value_type=None):
     not exist.
     Setting `value_type` will try to ensure that the returned value is of the
     nominated type (within reason).
+    An empty value is treated as unset for int and float types.
     Supported Python object types: str, list, tuple, bool, int, float.
     """
     value = None
@@ -21,9 +29,7 @@ def env(key, default=None, required=False, value_type=None):
     except (SyntaxError, ValueError):
         pass
     except KeyError:
-        if default is not None or not required:
-            return default
-        raise Exception(f"Missing required environment variable {key}")
+        return _default_for_missing(key, default, required)
 
     if value_type is None and default is not None:
         # If we've passed a default return value but not set a value_type, use the
@@ -67,8 +73,12 @@ def env(key, default=None, required=False, value_type=None):
                 f"{key} is a boolean environment variable and only accepts 'true', 'false' or '' (case-insensitive), but the configured value is '{value}'"
             )
     elif issubclass(value_type, int):
+        if isinstance(value, str) and not value.strip():
+            return _default_for_missing(key, default, required)
         return int(value)
     elif issubclass(value_type, float):
+        if isinstance(value, str) and not value.strip():
+            return _default_for_missing(key, default, required)
         return float(value)
     else:
         raise Exception(

@@ -517,6 +517,8 @@ def save_workloads(workloads, unreached_servers=None):
     """
     # save the workloads
     logger.debug("Begin to save the changed workloads data({}) to cache.".format(str_workloads(workloads)))
+    # Tolerate cache payloads written by older versions without a version key.
+    workloads.setdefault(item_version, 0)
     max_retries = 1000
     for _ in range(max_retries):
         if cache.add(key_workloads_lock, 1, timeout=1):
@@ -564,6 +566,8 @@ def save_assignedworkloads(assignedworkloads):
     """
     # save the workloads
     logger.debug("Begin to save the changed assigned workloads data({}) to cache.".format(assignedworkloads))
+    # Tolerate cache payloads written by older versions without a version key.
+    assignedworkloads.setdefault(item_version, 0)
     max_retries = 1000
     for _ in range(max_retries):
         if cache.add(key_assignedworkloads_lock, 1, timeout=1):
@@ -650,7 +654,6 @@ def populate_summary_data(datas):
 
         summary["cpu_total"] += serverdata["resources"]["cpu_total"]
 
-        summary["cpu_total"] += serverdata["resources"]["cpu_total"]
         if summary["cpu_min"] is None or summary["cpu_min"] > serverdata["resources"]["cpu_total"]:
             summary["cpu_min"] = serverdata["resources"]["cpu_total"]
         if summary["cpu_max"] is None or summary["cpu_max"] < serverdata["resources"]["cpu_total"]:
@@ -792,6 +795,49 @@ def harvest_healthdata(request):
 
 
 OFFLINE_STATUSCODE_LIST = (502, 503, 504, 401, 403, -1)
+
+
+def _find_oldest_workload(assignedworkloads, datas):
+    """Find the assigned workload that a spare server should replace.
+
+    An unhealthy assigned workload is preferred; otherwise the workload with
+    the oldest ``start_time`` is returned. Assignments whose server has no
+    health data (e.g. it is unreachable) are skipped, because they are reported
+    as offline hosts by the final mapping and must not be treated as usable.
+
+    Args:
+        assignedworkloads (dict): Mapping of workload name to server name.
+        datas (dict): Mapping of server name to ``(status_code, health_data)``.
+
+    Returns:
+        list | None: ``[workloadname, servername, health_data]`` or ``None``.
+    """
+    oldworkload = None
+    for workloadname, servername in assignedworkloads.items():
+        if workloadname == item_version:
+            continue
+        if servername not in datas:
+            # No health data for the assigned server (unreachable).
+            continue
+        if datas[servername][0] != 200:
+            # the assigned workload is not in good status, replace it
+            if oldworkload:
+                oldworkload[0] = workloadname
+                oldworkload[1] = servername
+                oldworkload[2] = datas[servername]
+            else:
+                oldworkload = [workloadname, servername, datas[servername]]
+            break
+        elif not oldworkload or oldworkload[2][1]["resources"]["start_time"] > datas[servername][1]["resources"]["start_time"]:
+            if oldworkload:
+                oldworkload[0] = workloadname
+                oldworkload[1] = servername
+                oldworkload[2] = datas[servername]
+            else:
+                oldworkload = [workloadname, servername, datas[servername]]
+    return oldworkload
+
+
 if WORKLOADS > 0 and WORKLOAD_DEPLOYMENT:
     # has a fixed number of workloads and it is a deployment
     WORKLOADNAMES = [get_workloadname(index) for index in range(WORKLOADS)]
@@ -807,7 +853,6 @@ if WORKLOADS > 0 and WORKLOAD_DEPLOYMENT:
         assignedworkloads = cache.get(key_assignedworkloads) or {item_version: 1}
         logger.debug("Get assigned workloads:{}".format(assignedworkloads))
         datas = {}
-        index = 0
         reassign_workloads = 0
         for workloadname in WORKLOADNAMES:
             servername = assignedworkloads.get(workloadname)
@@ -829,14 +874,11 @@ if WORKLOADS > 0 and WORKLOAD_DEPLOYMENT:
             del servers_res[servername]
 
         assignedworkloads_changed = False
-        if len(WORKLOADNAMES) != len(assignedworkloads):
-            # remove the unexisted workloads from assignedworkloads.
-            for key in [k for k in assignedworkloads.keys()]:
-                if key == item_version:
-                    continue
-                if key not in WORKLOADNAMES:
-                    assignedworkloads_changed = True
-                    del assignedworkloads[key]
+        # remove the workloads that no longer exist from assignedworkloads;
+        # item_version is not a workload and is always kept.
+        for key in [k for k in assignedworkloads if k != item_version and k not in WORKLOADNAMES]:
+            assignedworkloads_changed = True
+            del assignedworkloads[key]
 
         if reassign_workloads > 0:
             # Some workloads are not assigned a workload or are not available 
@@ -846,6 +888,7 @@ if WORKLOADS > 0 and WORKLOAD_DEPLOYMENT:
             step = 0
             while reassign_workloads > 0:
                 step += 1
+                progressed = False
                 for workloadname in WORKLOADNAMES:
                     servername = assignedworkloads.get(workloadname)
                     if servername in datas and datas[servername][0] not in OFFLINE_STATUSCODE_LIST:
@@ -873,6 +916,7 @@ if WORKLOADS > 0 and WORKLOAD_DEPLOYMENT:
                         del servers_res[replacedservername]
                         assignedworkloads[workloadname] = replacedservername
                         assignedworkloads_changed = True
+                        progressed = True
 
                     if servers_res:
                         reassign_workloads -= 1
@@ -880,6 +924,18 @@ if WORKLOADS > 0 and WORKLOAD_DEPLOYMENT:
                         reassign_workloads = 0
                     if reassign_workloads == 0:
                         break
+
+                if step > 1 and not progressed and reassign_workloads > 0:
+                    # Nothing could be replaced in this pass (e.g. duplicate
+                    # assignments or only offline spare servers). From step 2
+                    # onwards each pass behaves identically, so the state cannot
+                    # change; stop instead of spinning forever.
+                    logger.debug(
+                        "Unable to reassign workloads (remaining: {}). assigned workloads: {}".format(
+                            reassign_workloads, assignedworkloads
+                        )
+                    )
+                    break
 
         if any(data[0] == 200 for data in servers_res.values()):
             #still have some running workloads
@@ -889,26 +945,7 @@ if WORKLOADS > 0 and WORKLOAD_DEPLOYMENT:
                 if res[0] != 200:
                     continue
                 #Find the oldest workload to replace
-                oldworkload = None
-                for workloadname,servername in assignedworkloads.items():
-                    if workloadname == item_version:
-                        continue
-                    if datas[servername][0] != 200:
-                        #the assigned workload is not in good status, replace it 
-                        if oldworkload:
-                            oldworkload[0] = workloadname
-                            oldworkload[1] = servername
-                            oldworkload[2] = datas[servername]
-                        else:
-                            oldworkload = [workloadname,servername,datas[servername]]
-                        break
-                    elif not oldworkload or oldworkload[2][1]["resources"]["start_time"] > datas[servername][1]["resources"]["start_time"]:
-                        if oldworkload:
-                            oldworkload[0] = workloadname
-                            oldworkload[1] = servername
-                            oldworkload[2] = datas[servername]
-                        else:
-                            oldworkload = [workloadname,servername,datas[servername]]
+                oldworkload = _find_oldest_workload(assignedworkloads, datas)
 
                 if oldworkload:
                     if oldworkload[2][0] != 200 or res[1]["resources"]["start_time"] > oldworkload[2][1]["resources"]["start_time"]:
