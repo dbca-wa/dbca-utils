@@ -1,6 +1,6 @@
 [project]
 name = "dbca-utils"
-version = "3.0.15"
+version = "3.0.16"
 description = "Utilities for DBCA Django apps"
 authors = [
   { name = "Rocky Chen", email = "rocky.chen@dbca.wa.gov.au" },
@@ -28,7 +28,7 @@ dependencies = [
   "django>=5.2,<6.1",
   "markupsafe>=3.0",
   "psutil>=7.2",
-  "requests>=2.33",
+  "requests>=2.34",
 ]
 
 [project.urls]
